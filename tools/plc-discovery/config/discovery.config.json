@@ -1,5 +1,5 @@
 {
-  "endpointUrl": "opc.tcp://181.204.165.66:59100",
+  "endpointUrl": "opc.tcp://10.10.51.225:59100",
   "rootPath": [
     "AQUATECH",
     "CommDrivers",

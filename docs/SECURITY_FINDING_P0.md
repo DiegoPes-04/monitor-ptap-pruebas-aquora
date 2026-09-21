@@ -8,7 +8,7 @@
 | **Fecha de detección** | 2026-07-12 |
 | **Detectado por** | Ingeniería inversa de solo lectura (`tools/plc-discovery`), captura `output/00_endpoints.json` |
 | **Componente** | Servidor OPC UA FactoryTalk Optix HMI del PLC maestro CompactLogix 1769-L27ERM-QBFC1B |
-| **Estado** | **REPORTADO — pendiente de mitigación por la planta** |
+| **Estado** | **MITIGADO PARCIALMENTE** — la medida nº 1 (cerrar el puerto al exterior) está aplicada desde el 2026-09-21, confirmada de hecho por el cierre del path público. Las medidas 2–5 (cifrado, autenticación, mínimo privilegio) **siguen pendientes**: la sesión actual sigue siendo `Anonymous + None`, ahora dentro de la red OT |
 | **Responsable propuesto** | Administrador OT / integrador de FactoryTalk Optix de AQUATECH |
 
 ---

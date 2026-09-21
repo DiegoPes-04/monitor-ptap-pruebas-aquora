@@ -288,7 +288,7 @@ export class RouteCheckService {
 
   async run(): Promise<RouteCheckReport> {
     // El endpoint real del puente, de la MISMA fuente que usa el adapter (.env con default).
-    const endpoint = process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59100';
+    const endpoint = process.env.OPC_ENDPOINT ?? 'opc.tcp://10.10.51.225:59100';
     const url = new URL(endpoint);
     const host = url.hostname;
     const port = Number(url.port) || 4840; // 4840 = puerto estándar OPC UA

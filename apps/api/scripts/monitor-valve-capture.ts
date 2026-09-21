@@ -24,8 +24,9 @@ import {
   OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds,
   ClientSubscription, ClientMonitoredItem, TimestampsToReturn,
 } from 'node-opcua';
+import { resolverEndpoint } from './opc-endpoint';
 
-const ENDPOINT = process.argv[2] ?? process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59200';
+const ENDPOINT = resolverEndpoint(process.argv[2]);
 const SECONDS = Number(process.env.MONITOR_SECONDS ?? 120);
 const PLANT = process.env.PLANT ?? 'sirena';
 

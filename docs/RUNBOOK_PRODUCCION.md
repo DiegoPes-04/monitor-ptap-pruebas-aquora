@@ -299,7 +299,9 @@ APP_PUBLIC_URL=https://aquora.xpertic.co
 CORS_ORIGINS=https://aquora.xpertic.co,http://192.168.30.50
 
 CONNECTIVITY_PROVIDER=opcua
-OPC_ENDPOINT=opc.tcp://181.204.165.66:59200   # 2026-08-19: antes 10.10.51.225:59100 (interna)
+OPC_ENDPOINT=opc.tcp://10.10.51.225:59100     # 2026-09-21: vuelta a la interna tras cerrar la planta
+                                              # el path público (181.204.165.66:59200, 08-19 → 09-21).
+                                              # Requiere ruta 192.168.30.x → 10.10.51.0/24.
 OPC_SECURITY_MODE=None
 OPC_SECURITY_POLICY=None
 OPC_IDENTITY=anonymous

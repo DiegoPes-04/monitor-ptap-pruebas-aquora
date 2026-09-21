@@ -1,6 +1,7 @@
 # Incidente: se perdió el acceso al PLC maestro
 
-**Fecha:** 2026-07-21 · **Estado:** abierto, a la espera del administrador OT de la planta
+**Fecha:** 2026-07-21 · **Estado:** **cerrado el 2026-09-21** — se confirmó el cierre del puerto
+público y se migró a la ruta interna por VPN (ver §9)
 **Impacto:** el monitoreo no recibe datos de **ninguna** de las 12 plantas desde ~15:47.
 
 > **Resumen en una línea:** el servidor OPC UA `181.204.165.66` dejó de ser alcanzable desde
@@ -133,3 +134,34 @@ el umbral sin redeploy.
 normal es esperado; solo debe alertar si **persiste** (de ahí el `for: 5m` / umbral de N fallos). Al
 restablecerse el enlace, el puente vuelve a `Connected` solo y el health regresa a 200 sin
 intervención (ver §6).
+
+---
+
+## 9. Cierre (2026-09-21)
+
+**Se confirmó la hipótesis A:** la planta cerró el acceso público al servidor OPC UA — lo que el
+hallazgo del ping del 22-jul (host vivo, TCP filtrado) ya señalaba. El endpoint público
+`181.204.165.66:59200` no volverá a abrirse.
+
+**Acción aplicada** — la fila "Acceso por VPN a la red OT" de la tabla de decisión de §6:
+
+```
+OPC_ENDPOINT=opc.tcp://10.10.51.225:59100
+```
+
+Sin cambios de código en el puente: solo configuración, tal como anticipaba §6. La VM alcanza esa
+dirección por ruta directa desde `192.168.30.x`, sin NAT.
+
+**No se pidió reabrir el puerto público**, en línea con §7 y con
+[SECURITY_FINDING_P0.md](SECURITY_FINDING_P0.md). El incidente forzó la postura que el hallazgo P0
+ya recomendaba: el acceso OT va por VPN o red segregada, no por internet.
+
+**Deuda técnica saldada en el mismo cambio:** los 11 scripts de campo que tenían la IP y el puerto
+escritos a mano ahora usan `resolverEndpoint()` de `apps/api/scripts/opc-endpoint.ts` — el helper que
+se creó en agosto para este propósito y que ningún script llegó a importar. Los dos defaults del
+backend (`connectivity.config.ts`, `route-check.service.ts`) apuntaban además a una combinación que
+nunca existió (`181.204.165.66:59100`, IP pública con puerto interno); quedaron corregidos.
+
+**Requisito de red permanente:** la VM necesita ruta a `10.10.51.0/24`. Si se pierde, el síntoma es
+idéntico al de este incidente. Verificar con `nc -vz 10.10.51.225 59100` e `ip route get 10.10.51.225`
+antes de sospechar de la aplicación.

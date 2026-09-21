@@ -10,8 +10,9 @@
  * Uso:  PULSE=4096 HOLD_MS=1000 npm exec -w @ptap/api -- tsx scripts/write-sirena-pulse.ts --armar
  */
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds, DataType, VariantArrayType } from 'node-opcua';
+import { resolverEndpoint } from './opc-endpoint';
 
-const ENDPOINT = process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59200';
+const ENDPOINT = resolverEndpoint(process.argv[2]);
 const OUT_GUID = '4AB6ECB4-D019-D4F1-A8A8-6177C3FE3278'; // INT_OUT_SIRENA
 const IN_GUID = '184E4071-DC15-213A-3DE8-442A4E0A354B';  // INT_IN_SIRENA
 const INDEX = Number(process.env.INDEX ?? 0);

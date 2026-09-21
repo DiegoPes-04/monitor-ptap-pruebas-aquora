@@ -270,7 +270,7 @@ export function runGenerate(): void {
       archivo: 'apps/api/opc-config.json',
       problema:
         'Declara 8 plantas ficticias (ptap-1…ptap-8) con endpoints opc.tcp://plc-ptap-N:4840 y NodeIds "ns=2;s=PTAPN.Sensors" que NO EXISTEN. ' +
-        'El servidor real es uno solo (opc.tcp://181.204.165.66:59100) y los sitios reales son otros.',
+        'El servidor real es uno solo (opc.tcp://10.10.51.225:59100) y los sitios reales son otros.',
       accion: 'Reemplazar por una configuración de un único endpoint + catálogo de sitios reales + mapa de índices (cuando exista).',
       sitiosReales: analysis.sitios.map((s) => s.site),
     },

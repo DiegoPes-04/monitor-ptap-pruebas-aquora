@@ -142,8 +142,9 @@ export function loadConnectivityConfig(): ConnectivityConfig {
   return {
     provider,
     opcua: {
-      // El servidor se anuncia con IP interna 10.10.51.225 → endpointMustExist:false.
-      endpoint: str('OPC_ENDPOINT', 'opc.tcp://181.204.165.66:59100'),
+      // Ruta interna por la red OT: la planta cerró el path público el 2026-09-21. El servidor se
+      // anuncia con esta misma IP interna, pero tras NAT → endpointMustExist:false igualmente.
+      endpoint: str('OPC_ENDPOINT', 'opc.tcp://10.10.51.225:59100'),
       endpointMustExist: bool('OPC_ENDPOINT_MUST_EXIST', false),
       securityMode: str('OPC_SECURITY_MODE', 'None'),
       securityPolicy: str('OPC_SECURITY_POLICY', 'None'),

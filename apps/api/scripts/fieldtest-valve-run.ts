@@ -31,6 +31,7 @@ import { PlantCache } from '../src/infrastructure/connectivity/pipeline/plant-ca
 import { CONNECTIVITY_ADAPTER } from '../src/infrastructure/connectivity/connectivity.tokens';
 import type { ConnectivityAdapter } from '../src/infrastructure/connectivity/ports/connectivity-adapter.port';
 import type { Role } from '@ptap/shared';
+import { resolverEndpoint } from './opc-endpoint';
 
 const PORT = Number(process.env.PORT ?? 4001);
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -103,7 +104,7 @@ async function startWitness(): Promise<{ events: WitnessEvent[]; t0: number; sto
     connectionStrategy: { maxRetry: 1, initialDelay: 500, maxDelay: 1500 },
     requestedSessionTimeout: 600000,
   });
-  await client.connect(process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59200');
+  await client.connect(resolverEndpoint(process.argv[2]));
   const session = await client.createSession();
   const nsArray = await session.readNamespaceArray();
   const aq = nsArray.indexOf('AQUATECH');

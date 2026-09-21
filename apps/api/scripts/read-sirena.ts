@@ -6,8 +6,9 @@
  * Uso:  npm exec -w @ptap/api -- tsx scripts/read-sirena.ts  [opc.tcp://host:puerto]
  */
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds } from 'node-opcua';
+import { resolverEndpoint } from './opc-endpoint';
 
-const ENDPOINT = process.argv[2] ?? process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59200';
+const ENDPOINT = resolverEndpoint(process.argv[2]);
 const TARGETS = [
   { name: 'INT_OUT_SIRENA (COMANDO/canal 0)', guid: '4AB6ECB4-D019-D4F1-A8A8-6177C3FE3278' },
   { name: 'INT_IN_SIRENA  (ESTADO/read-back)', guid: '184E4071-DC15-213A-3DE8-442A4E0A354B' },

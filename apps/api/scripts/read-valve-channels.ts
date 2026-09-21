@@ -22,6 +22,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds, type ClientSession } from 'node-opcua';
+import { resolverEndpoint } from './opc-endpoint';
 
 interface RawBuffer {
   browseName: string;
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
 
   const iWatch = argv.indexOf('--watch');
   const watchSec = iWatch >= 0 ? Number(argv[iWatch + 1] ?? 60) : 0;
-  const endpoint = argv.find((a, i) => a.startsWith('opc.tcp://') && i > 0) ?? process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59200';
+  const endpoint = resolverEndpoint(argv.find((a, i) => a.startsWith('opc.tcp://') && i > 0));
 
   const planta = plantaDelMapping(plantId);
   const targets = (['intOut', 'intIn'] as const)

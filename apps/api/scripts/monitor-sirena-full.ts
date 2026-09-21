@@ -10,8 +10,9 @@ import {
   OPCUAClient, MessageSecurityMode, SecurityPolicy, AttributeIds,
   ClientSubscription, ClientMonitoredItem, TimestampsToReturn,
 } from 'node-opcua';
+import { resolverEndpoint } from './opc-endpoint';
 
-const ENDPOINT = process.argv[2] ?? process.env.OPC_ENDPOINT ?? 'opc.tcp://181.204.165.66:59200';
+const ENDPOINT = resolverEndpoint(process.argv[2]);
 const SECONDS = Number(process.env.MONITOR_SECONDS ?? 60);
 const TARGETS = [
   { key: 'OUT', name: 'INT_OUT_SIRENA', guid: '4AB6ECB4-D019-D4F1-A8A8-6177C3FE3278' },
