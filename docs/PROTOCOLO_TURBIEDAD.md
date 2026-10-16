@@ -22,7 +22,7 @@ Hacen falta **dos** cosas a la vez, y no hay ni una sola planta que reúna ambas
 | Soledad | ✅ `inletTurbidity` (op 0,1–5 NTU) y `outletTurbidity` (op 0,1–1) | ❌ no tiene válvula mapeada |
 | Carbonero | ✅ `inletTurbidity` (op 0–5) y `outletTurbidity` (op 0–1) | ❌ |
 | La Sirena | ✅ turbiedad de entrada y salida, **pero sin rango operativo declarado** | ❌ su única válvula es la de SALIDA |
-| **La Vorágine** | ❌ ninguna señal de calidad: solo caudales, nivel, volumen y presiones | ⚠️ tiene `valve2` de entrada, pero **no es accionable** — su índice es un ancla, no un canal de comando verificado |
+| **La Vorágine** | ❌ ninguna señal de calidad: solo caudales, nivel, volumen y presiones | ✅ `valve2` de entrada accionable desde el 2026-10-16 (integrador: bit2 abre, bit3 cierra en `INT_OUT_VORAGINE[0]`, señal sostenida) — sin probar aún en campo |
 
 Las nueve plantas restantes no tienen ninguna señal de calidad de agua.
 

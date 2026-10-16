@@ -3,7 +3,12 @@ import { hasPermission, type Permission, type Role } from '@ptap/shared';
 import { AuditLogService } from '../../infrastructure/audit/audit-log.service';
 import { CONNECTIVITY_ADAPTER, CONNECTIVITY_CONFIG } from '../../infrastructure/connectivity/connectivity.tokens';
 import type { ConnectivityConfig } from '../../infrastructure/connectivity/connectivity.config';
-import { motivoSecuenciaInvalida, type WriteSpec, type WriteStep } from '../../infrastructure/connectivity/mapping/opc-mapping.loader';
+import {
+  motivoSecuenciaInvalida,
+  motivoSostenidaInvalida,
+  type WriteSpec,
+  type WriteStep,
+} from '../../infrastructure/connectivity/mapping/opc-mapping.loader';
 import { PlantCache } from '../../infrastructure/connectivity/pipeline/plant-cache';
 import type { BufferElementTarget, ConnectivityAdapter } from '../../infrastructure/connectivity/ports/connectivity-adapter.port';
 import { NotificationRepository } from '../notifications/notification.repository';
@@ -59,6 +64,11 @@ function bitsDeLosOtrosVerbos(commands: Record<string, number | boolean>, value:
  * resolver target → verbo válido → precondición segura → RBAC (permiso del mapping) →
  * interlock (bridge Connected + snapshot fresco) → idempotencia (insert-pending-first) →
  * write → read-back con timeout → confirmado|fallido (+ rollback best-effort) → audit SIEMPRE.
+ *
+ * Una orden SOSTENIDA (`write.sustained`) recorre el mismo camino con una diferencia que no se
+ * negocia: después de escribir NO hay nada más que escribir. Ni pulso que limpiar, ni rollback si el
+ * estado no confirma, ni deshacer si algo falla — la señal tiene que quedar puesta (integrador de La
+ * Vorágine, 2026-10-16: «nunca las dos, siempre una de las dos»).
  */
 @Injectable()
 export class WriteService {
@@ -209,6 +219,18 @@ export class WriteService {
       }
     }
 
+    // 2-ter) GUARDA de la orden SOSTENIDA, por lo mismo que la de arriba: el loader ya la aplicó (y con
+    // un spec sostenido inválido el proceso ni arranca), pero es barata y al otro lado hay una válvula.
+    // Un spec sostenido con pulso o con rollbackValue SOLTARÍA la señal; en absoluto, o con verbos que
+    // comparten bits, dejaría el par en 1/1 o pisaría el de la otra válvula. Nada de eso llega a escribir.
+    if (write.sustained) {
+      const motivo = motivoSostenidaInvalida(write);
+      if (motivo) {
+        this.logger.error(`orden sostenida inválida en ${plantId}/${req.target}: ${motivo}`);
+        return this.audit(actor, req, await this.finalizeNoReserve({ ...reject(REJECT.INTERLOCK_FAILED), reason: `${REJECT.INTERLOCK_FAILED}: ${motivo}` }));
+      }
+    }
+
     // 3) PRECONDICIÓN DURA: writes habilitados Y sesión segura (autenticada+cifrada).
     const security = this.adapter.getWriteSecurity();
     if (!this.config.opcua.writesEnabled || !security.secure) {
@@ -269,6 +291,15 @@ export class WriteService {
         try {
           const prev = await this.adapter.readBufferElement(targetEl);
           base.previousValue = prev.value;
+          // Orden SOSTENIDA sin palabra legible: no hay read-modify-write posible, y `applyValue`
+          // caería a escribir el verbo en absoluto — que borraría el par de la OTRA válvula de la
+          // palabra y la dejaría sin señal (0/0). Se aborta ANTES de escribir; WRITE_REJECTED dice
+          // la verdad: no salió nada.
+          if (write.sustained && !(prev.quality === 'Good' && typeof prev.value === 'number' && Number.isFinite(prev.value))) {
+            throw new Error(
+              `orden SOSTENIDA sin palabra de mando legible en ${write.target.sourceBuffer}[${write.target.index}] (valor ${String(prev.value)}, calidad ${prev.quality}): no se escribe nada`,
+            );
+          }
           for (const paso of pasos) {
             // Los pasos de una SECUENCIA se escriben en absoluto: ahí la posición del array ES el
             // canal físico, no un bit dentro de una palabra compartida. En una orden simple se
@@ -321,7 +352,10 @@ export class WriteService {
       // pulso que confirmara el estado dejaba antes el bit ENCLAVADO (el rollback solo corría al
       // fallar) — con la válvula operativa eso habría dejado la orden puesta indefinidamente.
       let realimentacion = true;
-      if (write.pulse) {
+      // `!write.sustained` es redundante con la guarda 2-ter (un spec sostenido con pulso no llega
+      // aquí), y está a propósito: que una señal sostenida no se suelta jamás tiene que poder leerse
+      // en el mismo sitio donde se suelta todo lo demás.
+      if (write.pulse && !write.sustained) {
         try {
           realimentacion = await this.sostener(plantId, write);
         } finally {
@@ -359,12 +393,18 @@ export class WriteService {
         // El canal de estado de este sitio NO tiene semántica verificada en campo: su valor
         // esperado es una inferencia. Con el eco probando que la escritura quedó en el canal, no
         // hay base para declarar un fallo del equipo — pero tampoco para afirmar que se movió.
-        // Ver CommandOutcome.'sent'. Un pulso ya se limpió en 7b-bis; no se hace rollback.
+        // Ver CommandOutcome.'sent'. Un pulso ya se limpió en 7b-bis; no se hace rollback. Una orden
+        // SOSTENIDA acaba casi siempre aquí (La Vorágine no tiene estado verificado) y se queda puesta.
         await this.rollbackSteps(el, write, escritos);
         result = { ...base, status: 'sent', reason: SENT.SENT_STATE_UNVERIFIED };
       } else {
         // Un pulso ya se limpió en 7b-bis: no volver a escribir (sería un segundo pulso espurio).
         await this.rollbackSteps(el, write, escritos); // best-effort
+        if (write.sustained) {
+          this.logger.warn(
+            `orden SOSTENIDA ${req.command}/${req.target} de ${plantId} sin confirmar: se deja puesta (${escritos.map((e) => `[${e.index}]=${String(e.value)}`).join(' ')}). Soltarla dejaría la válvula sin señal; si procede, se manda el verbo contrario.`,
+          );
+        }
         result = { ...base, status: 'failed', reason: FAIL.READBACK_UNCONFIRMED };
       }
     } catch (err) {
@@ -476,6 +516,11 @@ export class WriteService {
    * cierre de pulso que falló, una escritura ajena— quedaba con las dos direcciones energizadas. Va en
    * la MISMA escritura a propósito: la palabra pasa de un sentido al otro sin ningún instante con los
    * dos bits puestos. Un verbo que vale 0 no energiza nada y se aplica como antes.
+   *
+   * En una orden SOSTENIDA (`sustained`) esto es la maniobra ENTERA: con los verbos sin bits
+   * compartidos (lo exige el loader), el par de la válvula queda exactamente en el verbo pedido —
+   * nunca 1/1 y nunca 0/0— en una sola escritura, y así se queda. El caso «actual no numérico» no
+   * llega aquí: `ejecutar` aborta antes de escribir.
    */
   private applyValue(write: WriteSpec, current: CommandValue, value: number | boolean): number | boolean {
     if (write.mode !== 'bitmask' || typeof value !== 'number' || typeof current !== 'number') return value;
@@ -547,8 +592,10 @@ export class WriteService {
       if (write.mode === 'bitmask' && typeof value === 'number') {
         const now = await this.adapter.readBufferElement(targetEl);
         const cleared = typeof now.value === 'number' ? (now.value & ~value) & 0xffff : write.rollbackValue;
+        if (cleared === undefined) throw new Error('la palabra no es legible y el spec no declara rollbackValue');
         await this.adapter.writeBufferElement(targetEl, cleared);
       } else {
+        if (write.rollbackValue === undefined) throw new Error('el spec no declara rollbackValue');
         await this.adapter.writeBufferElement(targetEl, write.rollbackValue);
       }
     } catch (err) {
@@ -561,6 +608,12 @@ export class WriteService {
   }
 
   private async rollback(targetEl: BufferElementTarget, write: WriteSpec): Promise<void> {
+    // Sin rollbackValue no hay valor «seguro» al que volver, y uno inventado (0) dejaría la válvula
+    // sin señal. Solo una orden sostenida lo omite, y a esa nunca se le llama aquí.
+    if (write.rollbackValue === undefined) {
+      this.logger.warn(`rollback omitido en ${targetEl.sourceBuffer}[${targetEl.index}]: el spec no declara rollbackValue`);
+      return;
+    }
     try {
       await this.adapter.writeBufferElement(targetEl, write.rollbackValue);
     } catch (err) {
@@ -573,8 +626,11 @@ export class WriteService {
    * lo que se energizó, y soltar primero lo último puesto evita pasar por un estado con dos
    * direcciones activas.
    *
-   * Dos casos NO se deshacen, a propósito:
+   * Tres casos NO se deshacen, a propósito:
    *  - `pulse`: ya se limpió en 7b-bis; repetirlo sería un segundo pulso espurio.
+   *  - `sustained`: la señal se queda puesta SIEMPRE (integrador de La Vorágine, 2026-10-16). No
+   *    tiene `rollbackValue`, y soltarla dejaría la válvula sin señal, que es lo que la regla prohíbe.
+   *    Si el estado no confirma, quien lo resuelve es una persona mandando el verbo contrario.
    *  - `latched`: la orden es SOSTENIDA y cada verbo define un estado eléctrico completo. Volver a
    *    `rollbackValue` dejaría la válvula en 0/0 — ni abierta ni cerrada, un estado que nadie pidió
    *    y del que el operador no se enteraría. Ahí lo correcto es dejar la orden puesta y que sea una
@@ -585,7 +641,7 @@ export class WriteService {
     write: WriteSpec,
     escritos: WriteStep[],
   ): Promise<void> {
-    if (write.pulse) return;
+    if (write.pulse || write.sustained) return;
     if (write.latched) {
       this.logger.warn(
         `orden SOSTENIDA sin confirmar en ${write.target.sourceBuffer}: se deja puesta (${escritos.map((e) => `[${e.index}]=${String(e.value)}`).join(' ')}). Deshacerla dejaría el actuador sin dirección; mandar el verbo contrario si procede.`,

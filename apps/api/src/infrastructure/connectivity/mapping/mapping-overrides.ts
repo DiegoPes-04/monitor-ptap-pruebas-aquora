@@ -1,4 +1,11 @@
-import type { LoadedMapping, MonitorTarget, SignalMapping, WriteSpec } from './opc-mapping.loader';
+import {
+  bitsCompartidosEntreValvulas,
+  motivoSostenidaInvalida,
+  type LoadedMapping,
+  type MonitorTarget,
+  type SignalMapping,
+  type WriteSpec,
+} from './opc-mapping.loader';
 
 /**
  * Correcciones del mapeo aplicadas ENCIMA del JSON del repositorio.
@@ -99,6 +106,8 @@ export type MotivoRechazo =
   | 'COMANDOS_INVALIDOS'
   | 'MODO_INCOMPATIBLE_CON_SECUENCIA'
   | 'SECUENCIA_NO_EDITABLE'
+  | 'MANDO_INCOMPATIBLE_CON_SOSTENIDA'
+  | 'BITS_COMPARTIDOS'
   | 'ESTADO_INVALIDO';
 
 export interface Rechazo {
@@ -136,10 +145,23 @@ export function aplicarOverrides(mapping: LoadedMapping, overrides: MappingOverr
   const signals = mapping.signals.map((s) => {
     const patch = porSenal.get(clave(s.plantId, s.domainKey));
     if (!patch) return s;
-    return fusionar(s, patch);
+    const out = fusionar(s, patch);
+    // Una fila guardada ANTES de que la válvula pasara a señal sostenida (o tocada a mano en la base)
+    // puede dejar un mando que el loader se negaría a cargar. Su parte de mando NO se aplica: rige la
+    // del repositorio, que sí está validada; lo de lectura (índice, unidad, rangos) se aplica igual.
+    // `validarParche` impide guardar filas así desde ahora; esto cubre las que ya estuvieran.
+    if (out.write?.sustained && motivoSostenidaInvalida(out.write)) return fusionar(s, sinMando(patch));
+    return out;
   });
 
   return { ...mapping, signals };
+}
+
+/** El parche sin sus campos de mando. */
+function sinMando(patch: MappingPatch): MappingPatch {
+  const out: MappingPatch = { ...patch };
+  for (const c of CAMPOS_DE_MANDO) delete out[c];
+  return out;
 }
 
 /** La señal con el parche puesto. `confidence` baja a `inferred`: ya no hay documento detrás. */
@@ -381,7 +403,7 @@ export function validarParche(
   }
 
   if (mandoTocado.length > 0 && senal.write && resultado.write) {
-    const veredictoMando = validarMando(mapping, plantId, senal.write, resultado.write, cambios);
+    const veredictoMando = validarMando(mapping, plantId, domainKey, senal.write, resultado.write, cambios);
     if (!veredictoMando.ok) return veredictoMando;
   }
 
@@ -406,6 +428,7 @@ export function validarParche(
 function validarMando(
   mapping: LoadedMapping,
   plantId: string,
+  domainKey: string,
   original: SignalMapping['write'],
   resultado: NonNullable<SignalMapping['write']>,
   cambios: MappingPatch,
@@ -483,6 +506,39 @@ function validarMando(
         ok: false,
         motivo: 'INDICE_FUERA_DE_RANGO',
         detalle: `${buffer.browseName} declara ${buffer.arrayLength} elementos: el último índice de mando válido es ${buffer.arrayLength - 1}.`,
+      };
+    }
+  }
+
+  // Una válvula de señal SOSTENIDA tiene reglas que un parche no puede romper: modo bitmask, al menos
+  // dos verbos, cada uno una máscara de 1 a 65535 sin bits compartidos. Son las mismas con las que el
+  // loader se NIEGA A ARRANCAR, así que aceptar aquí algo que las incumple dejaría en caliente un mando
+  // que el proceso, al reiniciar, no cargaría — o, peor, una válvula que se queda con los dos verbos
+  // puestos o con ninguno, que es lo que el integrador prohíbe. (`pulse`, `rollbackValue` y
+  // `sustained` no son editables desde la app: no hay forma de que un parche los toque.)
+  if (resultado.sustained) {
+    const motivo = motivoSostenidaInvalida(resultado);
+    if (motivo) {
+      return {
+        ok: false,
+        motivo: 'MANDO_INCOMPATIBLE_CON_SOSTENIDA',
+        detalle: `Esta válvula es de señal SOSTENIDA (siempre queda puesto abrir o cerrar, nunca los dos ni ninguno), y el cambio la dejaría inválida: ${motivo}.`,
+      };
+    }
+  }
+
+  // Y con la palabra COMPARTIDA: tras el cambio, ninguna otra válvula que mande por el mismo elemento
+  // puede usar un bit de esta. Es la misma regla de validate:mapping, aplicada al mapeo que quedaría.
+  if (cambios.writeCommands !== undefined || cambios.writeIndex !== undefined || cambios.writeMode !== undefined) {
+    const quedaria = mapping.signals
+      .filter((s) => s.plantId === plantId && s.writable)
+      .map((s) => ({ plantId: s.plantId, domainKey: s.domainKey, write: s.domainKey === domainKey ? resultado : s.write }));
+    const conflicto = bitsCompartidosEntreValvulas(quedaria).find((c) => c.valvulas.includes(domainKey));
+    if (conflicto) {
+      return {
+        ok: false,
+        motivo: 'BITS_COMPARTIDOS',
+        detalle: `Dos válvulas que mandan por la misma palabra no pueden compartir bits: ${conflicto.motivo}.`,
       };
     }
   }

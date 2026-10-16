@@ -220,6 +220,25 @@ test('probe: valor no finito se rechaza', () => {
   assert.equal(validarProbe(mapping(), 'carbonero', { ...PROBE, value: true }).ok, true);
 });
 
+test('probe: una palabra con válvulas de señal SOSTENIDA no se sondea (La Vorágine, integrador 2026-10-16)', () => {
+  // El probador escribe en ABSOLUTO durante el sostenido. En INT_OUT_VORAGINE[0] eso rompería la
+  // regla del integrador —siempre abrir o cerrar de cada válvula, nunca los dos ni ninguno— aunque
+  // después se soltara: cualquier valor de prueba deja algún par en 0/0 o en 1/1.
+  const m = mapping();
+  const sostenida: WriteSpec = { ...WRITE, commands: { open: 4096, close: 8192 }, sustained: true, pulse: null, rollbackValue: undefined };
+  const entrada: WriteSpec = { ...sostenida, commands: { open: 4, close: 8 } };
+  m.signals = m.signals.map((s) => (s.domainKey === 'valve1' ? { ...s, label: 'Válvula de salida', write: sostenida } : s));
+  m.signals.push({ ...m.signals.find((s) => s.domainKey === 'valve1')!, index: 1, domainKey: 'valve2', label: 'Válvula de entrada', write: entrada });
+
+  const v = validarProbe(m, 'carbonero', PROBE);
+  assert.equal(v.ok === false && v.motivo, 'SENAL_SOSTENIDA');
+  assert.match(v.ok === false ? v.detalle : '', /Válvula de salida y Válvula de entrada/);
+  // Otra posición del mismo buffer sí: allí no manda ninguna válvula sostenida.
+  assert.equal(validarProbe(m, 'carbonero', { ...PROBE, index: 1 }).ok, true);
+  // Y una válvula de pulso en esa misma palabra se sigue pudiendo sondear (el caso de Carbonero).
+  assert.equal(validarProbe(mapping(), 'carbonero', PROBE).ok, true);
+});
+
 test('probe: se identifican las válvulas que mandan por ese elemento', () => {
   // Es lo que permite bloquearlas mientras dura la prueba.
   assert.deepEqual(valvulasAfectadas(mapping(), 'carbonero', PROBE), ['valve1']);

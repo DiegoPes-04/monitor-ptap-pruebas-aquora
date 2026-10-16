@@ -20,7 +20,9 @@ import {
   valoresActuales,
   type MappingOverride,
 } from '../src/infrastructure/connectivity/mapping/mapping-overrides';
-import type { LoadedMapping, WriteSpec } from '../src/infrastructure/connectivity/mapping/opc-mapping.loader';
+import { join } from 'node:path';
+import { loadJson, validateMapping } from '../scripts/validate-mapping';
+import { loadMapping, type LoadedMapping, type WriteSpec } from '../src/infrastructure/connectivity/mapping/opc-mapping.loader';
 import { mappingPatchSchema } from '../src/modules/mapping/mapping-patch.schema';
 
 /**
@@ -432,4 +434,72 @@ test('cuerpo: los rangos y la unidad SÍ aceptan null (borrar es una corrección
   assert.equal(mappingPatchSchema.safeParse({ opMin: null }).success, true);
   assert.equal(mappingPatchSchema.safeParse({ unit: null }).success, true);
   assert.equal(mappingPatchSchema.safeParse({ min: Number.NaN }).success, false);
+});
+
+// ── Válvulas de señal SOSTENIDA (La Vorágine, integrador 2026-10-16) ─────────────────────────
+//
+// La app puede tocar `writeCommands`, `writeMode` y `writeIndex` de una válvula, pero no `pulse`,
+// `rollbackValue` ni `sustained`. Lo que tiene que impedir es que esos tres campos dejen una válvula
+// sostenida en algo que el loader se negaría a cargar — o que haga 1/1 o 0/0, o que mueva a la otra.
+
+/** El mapeo REAL: las dos válvulas de La Vorágine, sostenidas en INT_OUT_VORAGINE[0]. */
+function mappingReal(): LoadedMapping {
+  return loadMapping(join(__dirname, '..', 'config', 'opc_mapping.json'));
+}
+
+test('sostenida: un parche no puede pasar una válvula sostenida a modo absoluto', () => {
+  const v = validarParche(mappingReal(), 'voragine', 'valve1', { writeMode: 'absolute' });
+  assert.equal(v.ok === false && v.motivo, 'MANDO_INCOMPATIBLE_CON_SOSTENIDA');
+  assert.match(v.ok === false ? v.detalle : '', /SOSTENIDA/);
+});
+
+test('sostenida: un parche no puede dejarla con un solo verbo, con un verbo a cero o con booleanos', () => {
+  const casos: Array<Record<string, number | boolean>> = [
+    { open: 4096 },
+    { open: 4096, close: 0 },
+    { open: true, close: false },
+    { open: 4096, close: 4096 | 8192 },
+  ];
+  for (const writeCommands of casos) {
+    const v = validarParche(mappingReal(), 'voragine', 'valve1', { writeCommands });
+    assert.equal(v.ok === false && v.motivo, 'MANDO_INCOMPATIBLE_CON_SOSTENIDA', JSON.stringify(writeCommands));
+  }
+});
+
+test('sostenida: un parche no puede darle a una válvula los bits de la OTRA de la misma palabra', () => {
+  // El copia-y-pega: la entrada con el 4096 de la salida. «Abrir entrada» abriría la SALIDA.
+  const v = validarParche(mappingReal(), 'voragine', 'valve2', { writeCommands: { open: 4096, close: 8 } });
+  assert.equal(v.ok === false && v.motivo, 'BITS_COMPARTIDOS');
+  assert.match(v.ok === false ? v.detalle : '', /valve1/);
+  // Y moverla a otra palabra donde no choca con nadie sí se puede (es una corrección de índice).
+  assert.equal(validarParche(mappingReal(), 'voragine', 'valve2', { writeIndex: 2 }).ok, true);
+  // Unos bits nuevos, válidos y que no pisan a nadie, también.
+  assert.equal(validarParche(mappingReal(), 'voragine', 'valve1', { writeCommands: { open: 1024, close: 2048 } }).ok, true);
+});
+
+test('sostenida: una fila VIEJA que la dejaría inválida no se aplica en caliente (rige la del repositorio)', () => {
+  // Guardada antes de que la válvula fuera sostenida, o tocada a mano en la base. Lo de lectura sí
+  // se aplica; el mando, no.
+  const base = mappingReal();
+  const m = aplicarOverrides(base, [
+    { plantId: 'voragine', domainKey: 'valve1', patch: { writeMode: 'absolute', writeCommands: { open: 4096 }, unit: 'ZZ' }, by: 'x', at: null },
+  ]);
+  const s = m.signals.find((x) => x.plantId === 'voragine' && x.domainKey === 'valve1');
+  assert.equal(s?.write?.mode, 'bitmask');
+  assert.deepEqual(s?.write?.commands, { open: 4096, close: 8192 });
+  assert.equal(s?.write?.sustained, true);
+  assert.equal(s?.unit, 'ZZ', 'la parte de lectura del parche sí se aplicó');
+});
+
+test('sostenida: el documento resultante tampoco pasaría el schema (la tercera red del servicio)', () => {
+  // MappingOverrideService valida el documento ENTERO contra el schema antes de guardar nada. Con el
+  // mapeo real y un parche de modo absoluto sobre la salida, ese documento no es legal.
+  const raw = loadJson(join(__dirname, '..', 'config', 'opc_mapping.json'));
+  const schema = loadJson(join(__dirname, '..', 'config', 'opc_mapping.schema.json')) as object;
+  const doc = aplicarSobreRaw(raw, [
+    { plantId: 'voragine', domainKey: 'valve1', patch: { writeMode: 'absolute' }, by: 'x', at: null },
+  ]);
+  const r = validateMapping(schema, doc);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /write\/mode/.test(e)), r.errors.join(' | '));
 });

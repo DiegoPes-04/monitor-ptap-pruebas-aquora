@@ -13,6 +13,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020';
+import {
+  bitsCompartidosEntreValvulas,
+  motivoSostenidaInvalida,
+  type SenalConMando,
+} from '../src/infrastructure/connectivity/mapping/opc-mapping.loader';
 
 export interface ValidationResult {
   ok: boolean;
@@ -51,6 +56,8 @@ export function semanticErrors(mapping: unknown): string[] {
     const signals = Array.isArray(p.signals) ? p.signals : [];
     const seenSlot = new Set<string>();
     const seenDomainKey = new Set<string>();
+    /** Las válvulas de la planta, para la regla de bits compartidos en una misma palabra. */
+    const conMando: SenalConMando[] = [];
 
     signals.forEach((signal, sIdx) => {
       if (typeof signal !== 'object' || signal === null) return;
@@ -118,8 +125,20 @@ export function semanticErrors(mapping: unknown): string[] {
         if (rb && typeof rb.sourceBuffer === 'string' && !bufferNames(rb.channel).includes(rb.sourceBuffer)) {
           errors.push(`${label}: write.readBack.sourceBuffer "${rb.sourceBuffer}" no existe en opcBuffers.${String(rb.channel)} (señal "${String(s.domainKey)}")`);
         }
+
+        // Orden SOSTENIDA: las reglas que el schema no puede expresar (verbos sin bits compartidos)
+        // y, por si el schema cambiara, las demás. Es la MISMA función con la que el loader se niega
+        // a arrancar: lo que pasa aquí arranca allí, y al revés.
+        const w = s.write as Record<string, unknown>;
+        if (w.sustained === true) {
+          const motivo = motivoSostenidaInvalida(w);
+          if (motivo) errors.push(`${label}: write.sustained en "${String(s.domainKey)}": ${motivo}`);
+        }
+        conMando.push({ plantId: label, domainKey: String(s.domainKey), write: s.write as SenalConMando['write'] });
       }
     });
+
+    for (const c of bitsCompartidosEntreValvulas(conMando)) errors.push(`${label}: ${c.motivo}`);
 
     const conn = p.connection;
     if (conn && conn.mappingStatus === 'mapped') {

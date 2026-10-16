@@ -91,13 +91,39 @@ export interface WriteSpec {
    * el otro verbo (abrir = c0:1/c1:0, cerrar = c0:0/c1:1): deshacer un "abrir" a 0/0 dejaría el
    * actuador en un estado que no es ni abierto ni cerrado, y que nadie pidió.
    *
-   * Incompatible con `pulse` (uno se limpia solo, el otro no debe limpiarse).
+   * Incompatible con `pulse` (uno se limpia solo, el otro no debe limpiarse). Es la versión para
+   * ÓRDENES COMPUESTAS (`sequences`, posiciones del array en absoluto); para un par de bits dentro
+   * de una palabra compartida está `sustained`.
    */
   latched?: boolean;
   /**
+   * `true` ⇒ SEÑAL SOSTENIDA en una palabra compartida. Integrador del PLC de La Vorágine,
+   * 2026-10-16, textual: «estas señales deben ser sostenidas, es decir que todo el tiempo debe quedar
+   * la señal de apertura o la señal de cierre, nunca las dos, siempre una de las dos».
+   *
+   * Cada verbo es una máscara de bits de `target` y la orden es UNA escritura read-modify-write:
+   * `(actual & ~bitsDeLosOtrosVerbos) | bitsDelVerbo` (ver `WriteService.applyValue`). La palabra pasa
+   * de un verbo al otro sin ningún instante con los dos (1/1) ni con ninguno (0/0), y los bits de las
+   * demás válvulas de la palabra no se tocan. Y luego **no se suelta nunca**: ni al terminar, ni si el
+   * estado no confirma, ni si algo falla — soltar es justo dejar la válvula en 0/0.
+   *
+   * Reglas que el loader EXIGE, y con las que el backend NO ARRANCA si se incumplen (ver
+   * `motivoSostenidaInvalida`): `mode: 'bitmask'`; al menos dos verbos, cada uno una máscara entera
+   * de 1 a 65535 y sin bits compartidos entre ellos; y prohibidos `pulse`, `rollbackValue`,
+   * `sequences` y `latched`.
+   *
+   * Se llama `sustained` y no se reutilizó `latched` aunque ambos «no deshacen»: `latched` es de las
+   * órdenes compuestas (posiciones en absoluto, con su `rollbackValue`), y en este código «enclavar»
+   * significa otra cosa en los dos sitios donde aparece — un bit ENCLAVADO es la avería que el pulso
+   * evita, y `latchMode: 'latch'` del simulador es un PLC que se mueve con el flanco, lo contrario de
+   * lo que pidió el integrador. «Sostenida» es su palabra.
+   */
+  sustained?: boolean;
+  /**
    * Cómo se aplica el valor sobre el elemento:
    *  - `absolute` (default): se escribe el valor tal cual (pisa la palabra completa).
-   *  - `bitmask`: read-modify-write → activar = `actual | valor`, limpiar = `actual & ~valor`.
+   *  - `bitmask`: read-modify-write → activar = `(actual & ~bitsDeLosOtrosVerbos) | valor` (apaga el
+   *    verbo contrario de la MISMA válvula en la misma escritura), limpiar = `actual & ~valor`.
    *    OBLIGATORIO cuando la palabra concentra VARIOS comandos/válvulas: escribir absoluto
    *    apagaría los bits ajenos que estuvieran activos (p. ej. otra válvula del mismo sitio).
    */
@@ -139,7 +165,12 @@ export interface WriteSpec {
     stateVerified: boolean;
   };
   timeoutMs: number;
-  rollbackValue: number | boolean;
+  /**
+   * Valor con el que se limpia un pulso en `absolute` y se deshace una orden no confirmada.
+   * Obligatorio en todo spec SALVO en una orden sostenida (`sustained`), donde está PROHIBIDO: allí no
+   * se deshace nada, y volver a este valor dejaría la válvula sin señal.
+   */
+  rollbackValue?: number | boolean;
   permission: string; // Permission de @ptap/shared (control_valves | acknowledge_alarms | adjust_setpoints)
 }
 
@@ -230,6 +261,7 @@ interface RawWriteSpec {
   commands?: Record<string, number | boolean>;
   sequences?: Record<string, Array<{ index?: unknown; value?: unknown }>>;
   latched?: unknown;
+  sustained?: unknown;
   mode?: string;
   pulse?: { holdMs?: number; until?: { channel?: unknown; sourceBuffer?: unknown; index?: unknown; equals?: unknown } };
   readBack?: {
@@ -347,6 +379,120 @@ export function motivoSecuenciaInvalida(
   return null;
 }
 
+/** Algo está declarado si está y no es `null` (un `WriteSpec` parseado lleva `pulse: null` sin pulso). */
+function declarado(v: unknown): boolean {
+  return v !== undefined && v !== null;
+}
+
+/**
+ * Valida una orden SOSTENIDA (`sustained: true`) y devuelve el motivo del rechazo, o null si es
+ * correcta.
+ *
+ * Igual que `motivoSecuenciaInvalida`, esto no es forma: son las reglas que hacen que la orden cumpla
+ * lo que pide el integrador — siempre abrir o cerrar puesto, nunca los dos, nunca ninguno. La usan el
+ * loader (que con un spec sostenido inválido NO arranca), `validate:mapping`, la edición del mapeo en
+ * caliente y el WriteService justo antes de escribir.
+ *
+ * Sirve para el JSON crudo y para un `WriteSpec` ya parseado, y por eso mira PRESENCIA, no validez:
+ * un `pulse` mal escrito al lado de `sustained` sigue siendo pedir dos cosas opuestas.
+ */
+export function motivoSostenidaInvalida(spec: {
+  commands?: unknown;
+  mode?: unknown;
+  pulse?: unknown;
+  rollbackValue?: unknown;
+  sequences?: unknown;
+  latched?: unknown;
+}): string | null {
+  if (spec.mode !== 'bitmask') {
+    return `mode debe ser 'bitmask' y es ${JSON.stringify(spec.mode ?? 'absolute (por omisión)')}: cada verbo es un bit de una palabra que pueden compartir varias válvulas, y escribirla en absoluto borraría el par de las demás`;
+  }
+  if (declarado(spec.pulse)) {
+    return 'sustained y pulse son excluyentes: un pulso se LIMPIA al terminar, y una señal sostenida no se suelta nunca';
+  }
+  if (declarado(spec.rollbackValue)) {
+    return 'una orden sostenida no lleva rollbackValue: no se deshace nunca, y volver a ese valor dejaría la válvula sin señal (0/0), que es justo lo que la regla prohíbe';
+  }
+  if (declarado(spec.sequences)) {
+    return 'sustained no admite sequences: una orden compuesta escribe posiciones enteras en absoluto, y la sostenida es un par de bits dentro de una palabra';
+  }
+  if (spec.latched === true) {
+    return 'sustained y latched no se combinan: latched es de las órdenes compuestas, y sustained ya implica no deshacer nunca';
+  }
+  if (!spec.commands || typeof spec.commands !== 'object') return 'sin commands';
+  const verbos = Object.entries(spec.commands as Record<string, unknown>);
+  if (verbos.length < 2) {
+    return `una orden sostenida necesita al menos dos verbos (abrir y cerrar), y hay ${verbos.length}: sin el contrario, la señal no se podría cambiar nunca`;
+  }
+  let usados = 0;
+  for (const [verbo, valor] of verbos) {
+    if (typeof valor !== 'number' || !Number.isInteger(valor) || valor < 1 || valor > 0xffff) {
+      return `${verbo}: en una orden sostenida cada verbo es una máscara de bits entera de 1 a 65535, y vale ${JSON.stringify(valor)}`;
+    }
+    if ((usados & valor) !== 0) {
+      return `${verbo} (${valor}) comparte bits con otro verbo de la misma válvula: activarlo dejaría puesto parte del contrario — abrir y cerrar a la vez`;
+    }
+    usados |= valor;
+  }
+  return null;
+}
+
+/** Lo mínimo de una señal para saber por qué palabra manda y con qué bits. Vale para JSON crudo. */
+export interface SenalConMando {
+  plantId: string;
+  domainKey: string;
+  write?: {
+    target?: { channel?: unknown; sourceBuffer?: unknown; index?: unknown };
+    mode?: unknown;
+    commands?: unknown;
+    sustained?: unknown;
+  };
+}
+
+/**
+ * Válvulas que mandan por la MISMA palabra (misma planta, buffer e índice) en `bitmask` no pueden
+ * compartir ni un bit: si lo compartieran, la orden de una encendería o apagaría un verbo de la otra.
+ * Con dos válvulas sostenidas en `INT_OUT_VORAGINE[0]` un copia-y-pega de 4096/8192 en la de entrada
+ * haría que «abrir entrada» abriera la SALIDA, y ninguna regla por válvula lo vería.
+ *
+ * Devuelve un aviso por par en conflicto, con las dos válvulas; `sostenida` dice si alguna de las
+ * dos lo es (el loader solo se niega a arrancar por esas; `validate:mapping` las rechaza todas).
+ */
+export function bitsCompartidosEntreValvulas(
+  senales: SenalConMando[],
+): Array<{ motivo: string; sostenida: boolean; valvulas: [string, string] }> {
+  const porPalabra = new Map<string, Array<{ domainKey: string; bits: number; sostenida: boolean }>>();
+  for (const s of senales) {
+    const w = s.write;
+    if (!w || w.mode !== 'bitmask' || !w.target || !w.commands || typeof w.commands !== 'object') continue;
+    const { channel, sourceBuffer, index } = w.target;
+    if (typeof sourceBuffer !== 'string' || typeof index !== 'number') continue;
+    let bits = 0;
+    for (const v of Object.values(w.commands as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isInteger(v)) bits |= v & 0xffff;
+    }
+    const palabra = `${s.plantId}/${String(channel)}/${sourceBuffer}[${index}]`;
+    const lista = porPalabra.get(palabra) ?? [];
+    lista.push({ domainKey: s.domainKey, bits, sostenida: w.sustained === true });
+    porPalabra.set(palabra, lista);
+  }
+  const conflictos: Array<{ motivo: string; sostenida: boolean; valvulas: [string, string] }> = [];
+  for (const [palabra, valvulas] of porPalabra) {
+    for (let i = 0; i < valvulas.length; i++) {
+      for (let j = i + 1; j < valvulas.length; j++) {
+        const comun = valvulas[i].bits & valvulas[j].bits;
+        if (comun === 0) continue;
+        conflictos.push({
+          motivo: `${valvulas[i].domainKey} y ${valvulas[j].domainKey} mandan por ${palabra} y comparten bits (${comun}): la orden de una movería a la otra`,
+          sostenida: valvulas[i].sostenida || valvulas[j].sostenida,
+          valvulas: [valvulas[i].domainKey, valvulas[j].domainKey],
+        });
+      }
+    }
+  }
+  return conflictos;
+}
+
 function parseSequences(
   raw: RawWriteSpec['sequences'],
   spec: { target: BufferElementRef; commands: Record<string, number | boolean>; mode: 'absolute' | 'bitmask' },
@@ -373,14 +519,34 @@ function parseSequences(
 /**
  * Parsea el write spec. Confía en que el schema ya validó la forma (validate:mapping es el
  * gate); aquí solo se normaliza. Devuelve undefined si la señal no es writable o no lo trae.
+ *
+ * La excepción es la orden SOSTENIDA: si incumple sus reglas, esto LANZA y el backend no arranca.
+ * Descartarla en silencio, como se hace con lo demás, dejaría las válvulas sin mando tras un
+ * despliegue sin que nadie lo supiera hasta que un operario lo intentara; y aplicarla a medias
+ * (con un pulso, con un rollbackValue) haría justo lo que el integrador prohíbe: soltar la señal.
+ * `donde` es `planta/domainKey`, para que el mensaje diga qué corregir.
  */
-function parseWriteSpec(raw: RawWriteSpec | undefined): WriteSpec | undefined {
+function parseWriteSpec(raw: RawWriteSpec | undefined, donde: string): WriteSpec | undefined {
   if (!raw || !raw.target || !raw.commands || !raw.readBack) return undefined;
   const { channel, sourceBuffer, index } = raw.target;
   if (typeof channel !== 'string' || typeof sourceBuffer !== 'string' || typeof index !== 'number') return undefined;
   if (typeof raw.readBack.channel !== 'string' || typeof raw.readBack.index !== 'number') return undefined;
   if (typeof raw.timeoutMs !== 'number' || typeof raw.permission !== 'string') return undefined;
-  if (raw.rollbackValue === undefined) return undefined;
+
+  if (raw.sustained !== undefined && typeof raw.sustained !== 'boolean') {
+    throw new Error(`opc_mapping.json: ${donde}: write.sustained tiene que ser true o false, y vale ${JSON.stringify(raw.sustained)}`);
+  }
+  const sustained = raw.sustained === true;
+  if (sustained) {
+    const motivo = motivoSostenidaInvalida(raw);
+    if (motivo) {
+      throw new Error(
+        `opc_mapping.json: ${donde}: orden SOSTENIDA inválida — ${motivo}. El backend no arranca con este mapping; \`npm run validate:mapping\` lo detecta antes de desplegar.`,
+      );
+    }
+  } else if (raw.rollbackValue === undefined) {
+    return undefined;
+  }
 
   const mode = raw.mode === 'bitmask' ? 'bitmask' : 'absolute';
   const pulse = typeof raw.pulse?.holdMs === 'number' && raw.pulse.holdMs > 0
@@ -414,6 +580,7 @@ function parseWriteSpec(raw: RawWriteSpec | undefined): WriteSpec | undefined {
     commands: raw.commands,
     ...(seq.sequences ? { sequences: seq.sequences } : {}),
     ...(latched ? { latched: true } : {}),
+    ...(sustained ? { sustained: true } : {}),
     mode,
     pulse,
     readBack: {
@@ -428,7 +595,9 @@ function parseWriteSpec(raw: RawWriteSpec | undefined): WriteSpec | undefined {
       stateVerified: raw.readBack.stateVerified !== false,
     },
     timeoutMs: raw.timeoutMs,
-    rollbackValue: raw.rollbackValue,
+    // Ausente solo en una orden sostenida (arriba se comprobó): la clave ni aparece, para que nadie
+    // pueda leer un `undefined` como «limpiar a 0».
+    ...(raw.rollbackValue !== undefined ? { rollbackValue: raw.rollbackValue } : {}),
     permission: raw.permission,
   };
 }
@@ -517,12 +686,20 @@ export function loadMapping(explicitPath?: string): LoadedMapping {
         mappingStatus: s.mappingStatus === 'unmapped' ? 'unmapped' : 'mapped',
         confidence: (s.confidence as SignalMapping['confidence']) ?? 'inferred',
         writable: s.writable === true,
-        write: s.writable === true ? parseWriteSpec(s.write) : undefined,
+        write: s.writable === true ? parseWriteSpec(s.write, `${plant.plantId}/${s.domainKey}`) : undefined,
         stateEncoding: parseStateEncoding(s.stateEncoding),
         flowDomainKey: typeof s.flowDomainKey === 'string' ? s.flowDomainKey : undefined,
         stateTrusted: typeof s.stateTrusted === 'boolean' ? s.stateTrusted : undefined,
       });
     }
+  }
+
+  // Dos válvulas de la misma palabra que comparten un bit: si alguna es SOSTENIDA, no se arranca —
+  // con la señal puesta para siempre, la orden de una movería a la otra sin que nadie lo pidiera.
+  // Si ninguna lo es, se avisa y sigue (validate:mapping las rechaza todas antes de desplegar).
+  for (const c of bitsCompartidosEntreValvulas(signals)) {
+    if (c.sostenida) throw new Error(`opc_mapping.json (${path}): ${c.motivo}. El backend no arranca con este mapping.`);
+    console.error(`[opc-mapping] ${c.motivo}`);
   }
 
   const result: LoadedMapping = {

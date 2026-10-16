@@ -647,6 +647,69 @@ test('sim e2e: Carbonero REAL — sin realimentación declarada sale en ámbar (
   }
 });
 
+// ── Mapping REAL de La Vorágine: dos válvulas SOSTENIDAS en la misma palabra (integrador 2026-10-16) ──
+
+test('sim e2e: La Vorágine REAL — entrada y salida sostenidas en INT_OUT[0]: una escritura por orden, nada se suelta, nunca 1/1', async (t) => {
+  relojFalso(t);
+  const real = loadMapping(RUTA_MAPPING_PRODUCCION);
+  const escenario = opcionesDesdeEscenario(leerEscenario(resolverRutaEscenario('produccion')));
+  // Tiempos de campo del escenario (MSG de 8 s, 30 s de recorrido, hold) y 100 ms por petición OPC UA.
+  const m = await montar({ ...escenario, ioLatencyMs: 100 }, { mapping: real, resolver: resolverDe(real) });
+  const PALABRA = 'INT_OUT_VORAGINE';
+  try {
+    await avanzar(t, 3000);
+    assert.equal(m.sim.getSimulatedValve('voragine', 'valve1')?.state, 'closed');
+    assert.equal(m.sim.getSimulatedValve('voragine', 'valve2')?.state, 'closed');
+
+    // Las DOS a la vez: dos operarios, o uno que confirma las dos seguidas.
+    const t0 = Date.now();
+    const [salida, entrada] = await esperar(
+      t,
+      Promise.all([orden(m, 'voragine', 'valve1', 'open'), orden(m, 'voragine', 'valve2', 'open')]),
+      10_000,
+    );
+    const ms = Date.now() - t0;
+    for (const r of [salida, entrada]) {
+      // Sin semántica de estado verificada: ámbar, con el eco del canal de mando.
+      assert.equal(r.status, 'sent', `${r.target}: ${r.status} ${r.reason}`);
+      assert.equal(r.writeVerified, true, `${r.target}: el eco ve SU escritura`);
+    }
+    assert.ok(ms < 3000, `las dos órdenes vuelven en ${ms} ms simulados: sin sostenido de 45 s que esperar`);
+    // Una escritura por orden. Cuál entra primero lo decide el turno de la palabra; la segunda ya lee
+    // la primera, así que el final es el mismo: las dos señales de abrir puestas.
+    const abrir = escriturasEn(m.sim.getWriteHistory(), PALABRA).map((w) => Number(w.value));
+    assert.equal(abrir.length, 2, `una escritura por orden: ${JSON.stringify(abrir)}`);
+    assert.ok([4, 4096].includes(abrir[0]), `la primera pone solo su bit: ${abrir[0]}`);
+    assert.equal(abrir[1], 4 | 4096);
+
+    // Un minuto después la señal SIGUE puesta (nadie la limpió) y el PLC local, que solo mueve con el
+    // bit sostenido, llevó las dos válvulas al tope.
+    await avanzar(t, 60_000, 50);
+    assert.equal(escriturasEn(m.sim.getWriteHistory(), PALABRA).length, 2, 'ninguna escritura de limpieza');
+    assert.equal(m.sim.getSimulatedValve('voragine', 'valve1')?.state, 'open');
+    assert.equal(m.sim.getSimulatedValve('voragine', 'valve2')?.state, 'open');
+
+    // Y cerrar las dos, otra vez a la vez: cada par pasa de abrir a cerrar en UNA escritura.
+    await esperar(t, Promise.all([orden(m, 'voragine', 'valve2', 'close'), orden(m, 'voragine', 'valve1', 'close')]), 10_000);
+    await avanzar(t, 60_000, 50);
+    const ws = escriturasEn(m.sim.getWriteHistory(), PALABRA);
+    assert.equal(ws.length, 4);
+    assert.equal(ws[ws.length - 1].value, 8 | 8192, 'las dos cerradas y con la señal de cerrar puesta');
+    assert.deepEqual(conLosDosSentidos(ws, 4096, 8192), [], 'salida: jamás abrir y cerrar a la vez');
+    assert.deepEqual(conLosDosSentidos(ws, 4, 8), [], 'entrada: jamás abrir y cerrar a la vez');
+    assert.deepEqual(bitsAjenosIntactos(ws, 4 | 8 | 4096 | 8192), [], 'ningún bit fuera de los dos pares');
+    for (const w of ws) {
+      const cambio = Number(w.value) ^ Number(w.previous);
+      assert.ok((cambio & ~(4 | 8)) === 0 || (cambio & ~(4096 | 8192)) === 0, `cada escritura mueve UNA válvula: ${String(w.previous)} → ${String(w.value)}`);
+    }
+    assert.equal(m.sim.getSimulatedValve('voragine', 'valve1')?.state, 'closed');
+    assert.equal(m.sim.getSimulatedValve('voragine', 'valve2')?.state, 'closed');
+    assert.deepEqual(m.sim.getViolations(), []);
+  } finally {
+    await m.parar();
+  }
+});
+
 // ── Válvulas en buffers distintos y en bitOut ─────────────────────────────────────────
 
 test('sim e2e: buffers distintos — absoluta, máscara con pulse.until en otro INT_OUT y dos bobinas en bitOut; cada una toca solo lo suyo', async (t) => {

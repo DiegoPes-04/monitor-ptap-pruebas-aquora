@@ -157,14 +157,11 @@
           "confidence": "confirmed",
           "writable": true,
           "write": {
-            "_riesgo": "VERIFICADO EN CAMPO por el cliente (2026-08-15) y ya operando: abrir = 4096 (bit12) y cerrar = 8192 (bit13) en INT_OUT[0]. Actua sobre el CAUDAL DE SALIDA. LA SENAL ES SOSTENIDA, NO UN PULSO: se mantiene puesta hasta que INT_IN[1] vale 1, y solo entonces se suelta (pulse.until). Antes se soltaba a los 300 ms a ciegas, lo que en una valvula motorizada arranca el movimiento y lo corta a mitad. Se compara el VALOR ENTERO, no bits: INT_IN[1] valia 1025 = bits{0,10} el dia del cambio, asi que una condicion 'bit0 encendido' se habria cumplido en el primer instante y habria cortado la senal antes de que la valvula se moviera. TOPE DURO 45 s, no los 60 s que se plantearon. nginx NO es el limite: se verifico en la VM el 2026-08-15 que /etc/nginx/snippets/ptap-app.conf declara proxy_read_timeout 300s, que es el que gobierna una respuesta lenta del backend. El limite real es el cliente: el fetch de la app no fija timeout, asi que manda el de la plataforma (~60 s en iOS/NSURLSession). Pasarse de ahi le muestra al operador un error de red con la orden viva en el PLC, invitando a pulsar otra vez. Si vence el tope, el bit se limpia igual y el comando sale HOLD_FEEDBACK_TIMEOUT. Lectura del PLC ese dia con la valvula pasando agua (outletFlow1 = 1,61 l/s, entrada 6,93 l/s): INT_OUT[0..19] todos a 0 e INT_IN[0] = 7192 = bits{3,4,10,11,12}. HIPOTESIS, NO CONFIRMADA: el bit12 de INT_IN[0] es el mismo bit del comando de abrir y el bit13 (cerrar) esta ausente. Es UNA sola muestra con la valvula en UNA posicion, asi que readBack sigue con stateVerified:false y el veredicto lo da el caudal de salida. Revertir: pulse a { holdMs: 300 } sin until.",
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. El mando de las DOS valvulas de La Voragine esta en la MISMA palabra INT_OUT_VORAGINE[0]: SALIDA (esta, valve1) abrir = bit12 (4096), cerrar = bit13 (8192); ENTRADA (valve2) abrir = bit2 (4), cerrar = bit3 (8). Los valores de la salida son los mismos que el cliente verifico en campo el 2026-08-15; la interpretacion antigua del bit12 como 'pulso' (docs/PROTOCOLO_VALVULAS_VORAGINE.md) era erronea: es abrir salida. REGLA DEL INTEGRADOR, textual: 'estas senales deben ser sostenidas, es decir que todo el tiempo debe quedar la senal de apertura o la senal de cierre, nunca las dos, siempre una de las dos'. Por eso sustained: true. Una orden es UNA escritura read-modify-write en turno: abrir = (actual & ~8192) | 4096, cerrar = (actual & ~4096) | 8192. El par 12/13 pasa de un verbo al otro sin ningun instante en 1/1 ni en 0/0, y los bits 2/3 de la entrada no se tocan. Y la senal NO SE SUELTA NUNCA: ni al terminar, ni si el estado no confirma, ni si algo falla. POR QUE YA NO HAY pulse NI until NI LIMPIEZA: desde el 2026-08-15 la senal se sostenia hasta que INT_IN[1] valia 1 (tope 45 s) y despues el WriteService la LIMPIABA (clearPulse), lo que dejaba la valvula en 0/0 tras cada orden: justo lo que la regla prohibe. Sin pulse tampoco hay sostenido de 45 s que esperar: la respuesta a la app vuelve en ~1 s (read-back de 600 ms por stateVerified false). Sin rollbackValue: no hay valor al que volver, y el loader se niega a arrancar si alguien combina sustained con pulse o con rollbackValue. ESTADO INICIAL: hasta la primera orden despues de desplegar, INT_OUT[0] sigue como lo dejaron los pulsos (0 = las dos valvulas 0/0). La app solo ofrece el verbo CONTRARIO al estado deducido del caudal, asi que no puede reafirmar el actual: para fijar la senal sin mover la valvula, apps/api/scripts/test-valvulas-voragine.ts con el verbo que coincide con su posicion. READ-BACK sin cambios: INT_IN[0] con expectedValue 16385 SIN verificar (stateVerified false), el mismo valor para abrir y para cerrar y nunca observado en esta planta (su INT_IN[0] no lleva bit14), asi que el desenlace es sent (ambar) cuando el eco confirma la escritura. El estado lo da el caudal de salida (flowDomainKey outletFlow1). Revertir: quitar sustained y reponer \"pulse\": { \"holdMs\": 45000, \"until\": { \"channel\": \"intIn\", \"sourceBuffer\": \"INT_IN_VORAGINE\", \"index\": 1, \"equals\": 1 } } y \"rollbackValue\": 0 (la forma del 2026-08-15); OJO, eso vuelve a dejar la valvula en 0/0 despues de cada orden.",
             "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_VORAGINE", "index": 0 },
             "commands": { "open": 4096, "close": 8192 },
             "mode": "bitmask",
-            "pulse": {
-              "holdMs": 45000,
-              "until": { "channel": "intIn", "sourceBuffer": "INT_IN_VORAGINE", "index": 1, "equals": 1 }
-            },
+            "sustained": true,
             "readBack": {
               "channel": "intIn",
               "sourceBuffer": "INT_IN_VORAGINE",
@@ -174,7 +171,6 @@
               "stateVerified": false
             },
             "timeoutMs": 5000,
-            "rollbackValue": 0,
             "permission": "control_valves"
           }
         },
@@ -185,10 +181,25 @@
           "domainKey": "valve2",
           "label": "Válvula de entrada",
           "flowDomainKey": "inletFlow1",
-          "_nota": "SIN CANAL DE COMANDO CONOCIDO. Esta valvula existe fisicamente (el cliente confirmo el 2026-08-15 que La Voragine tiene dos: entrada y salida), pero no se sabe con que frecuencia de bits se mueve ni tiene palabra de estado. Por eso writable:false y sin write spec: la app la muestra pero NO la acciona. EL INDICE ES UN ANCLA, NO UNA AFIRMACION. Toda senal debe colgar de un elemento real de un buffer monitorizado o el MappingEngine la marca rota y emite un dead-letter en cada barrido; realIn[0] no servia porque chocaria con inletFlow1 (validate-mapping rechaza dos senales en el mismo canal[indice]). Se eligio INT_OUT_VORAGINE[1] por estar libre y ser el canal donde vivira su comando cuando lo haya, pero NADIE ha verificado que la entrada se mande por esa posicion. No deducir de aqui el indice del comando. SU ESTADO SALE DEL CAUDAL DE ENTRADA (flowDomainKey: inletFlow1), que es evidencia fisica: por encima de 0,1 l/s esta abierta. Cuando el cliente entregue las frecuencias de bits: anadir el write spec, poner writable:true, confidence:confirmed y corregir el indice al que diga el campo.",
           "mappingStatus": "mapped",
-          "confidence": "estimated",
-          "writable": false
+          "confidence": "confirmed",
+          "writable": true,
+          "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. Valvula de ENTRADA: abrir = bit2 (4), cerrar = bit3 (8), en INT_OUT_VORAGINE[0], la MISMA palabra que la salida (valve1, bits 12/13). REGLA DEL INTEGRADOR, textual: 'estas senales deben ser sostenidas, es decir que todo el tiempo debe quedar la senal de apertura o la senal de cierre, nunca las dos, siempre una de las dos'. sustained: una orden es UNA escritura read-modify-write: abrir = (actual & ~8) | 4, cerrar = (actual & ~4) | 8, sin pasar por 1/1 ni por 0/0, sin tocar los bits 12/13 de la salida, y sin soltarla nunca. Las ordenes de las dos valvulas sobre la misma palabra van en turno en el WriteService (turnoDe), asi que una no pisa a la otra aunque lleguen a la vez. ANCLA, NO MANDO: la senal cuelga de INT_OUT_VORAGINE[1] (index 1) pero MANDA por INT_OUT_VORAGINE[0] (write.target). validate-mapping rechaza dos senales en el mismo canal[indice] y el [0] ya es de valve1; es el mismo patron del mapping de prueba del simulador (sim-dos, sim-tres). La app no usa el valor de esta senal para el estado. NO deducir del index 1 que la entrada se mande por ahi. ESTADO: lo da el caudal de entrada (flowDomainKey inletFlow1, > 0,1 l/s = abierta). READ-BACK: INT_IN_VORAGINE[0], el mismo elemento que lee la salida, SIN semantica conocida para esta valvula (el integrador no entrego bits de estado). Sin expectedValue a proposito: el 16385 de valve1 es una hipotesis sobre la palabra de estado de la SALIDA y aqui no tiene ninguna base. Sin el, WriteService compara INT_IN[0] con el valor del verbo (4 u 8), que no coincide salvo casualidad (INT_IN[0] ha llevado los bits 10-12 en todas las capturas: 7192, 7176, 7194). Con stateVerified false y el eco del canal de mando, el desenlace es sent (ambar): ni confirma ni culpa a la valvula por un estado que nadie sabe leer. timeoutMs igual que valve1 (con stateVerified false el read-back espera 600 ms). NO PROBADO EN CAMPO todavia: primera maniobra con testigo mirando el caudal de entrada, idealmente con apps/api/scripts/test-valvulas-voragine.ts. Hasta la primera orden, su par 2/3 sigue en 0/0. Revertir: writable false, confidence estimated, quitar write (ver git log de este archivo).",
+            "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_VORAGINE", "index": 0 },
+            "commands": { "open": 4, "close": 8 },
+            "mode": "bitmask",
+            "sustained": true,
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_VORAGINE",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "stateVerified": false
+            },
+            "timeoutMs": 5000,
+            "permission": "control_valves"
+          }
         },
         {
           "buffer": "realIn",

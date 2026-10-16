@@ -1,6 +1,6 @@
 {
   "name": "produccion",
-  "description": "El mapping REAL (config/opc_mapping.json) contra el simulador, con los supuestos de campo: MSG de 8 s y recorrido de 30 s en hold. Para ver en local lo que hoy haría cada planta: las de pulso de 300 ms casi nunca llegan al PLC local, Carbonero sale en ámbar (sent) porque nadie ha declarado su realimentación, y La Vorágine se sostiene hasta que INT_IN[1] vale 1.",
+  "description": "El mapping REAL (config/opc_mapping.json) contra el simulador, con los supuestos de campo: MSG de 8 s y recorrido de 30 s en hold. Para ver en local lo que hoy haría cada planta: las de pulso de 300 ms casi nunca llegan al PLC local, Carbonero sale en ámbar (sent) porque nadie ha declarado su realimentación, y las DOS válvulas de La Vorágine (entrada bits 2/3, salida bits 12/13 de INT_OUT[0]) llevan señal SOSTENIDA (integrador 2026-10-16): una escritura por orden y la señal se queda puesta.",
   "mapping": "../../config/opc_mapping.json",
   "ioLatencyMs": 50,
   "defaults": {
@@ -18,7 +18,7 @@
       "feedback": "none"
     },
     "voragine/valve1": {
-      "_nota": "INT_IN[1] valía 1025 en reposo (2026-08-15); el sostenido se suelta cuando vale 1.",
+      "_nota": "Señal SOSTENIDA desde el 2026-10-16: ya no hay pulse.until (INT_IN[1] = 1) que la suelte, así que untilIdleValue no se usa. Se deja el 1025 que valía INT_IN[1] en reposo (2026-08-15) por si se vuelve a la forma anterior.",
       "untilIdleValue": 1025
     }
   }

@@ -205,8 +205,31 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Fase 5: traducción de un comando de dominio a una escritura de buffer/bit. Solo en señales writable (⇒ confidence confirmed o inferred, nunca estimated). La semántica vive aquí, nunca en el código (regla 2). Un spec con confidence inferred es uno capturado en campo con el probador de canales y escrito desde la consola de administración: funciona igual, y el campo existe para que se sepa cuál es cuál.",
-      "required": ["target", "commands", "readBack", "timeoutMs", "rollbackValue", "permission"],
+      "required": ["target", "commands", "readBack", "timeoutMs", "permission"],
       "allOf": [
+        {
+          "description": "Una orden SOSTENIDA (sustained: true) no se deshace nunca: exige mode bitmask; al menos dos verbos, cada uno una máscara entera de 1 a 65535; y PROHÍBE pulse (se limpia al terminar), rollbackValue (volver a él dejaría la válvula sin señal), sequences (posiciones en absoluto) y latched (el de las órdenes compuestas). Cualquier otro spec sigue exigiendo rollbackValue. Lo que JSON Schema no puede expresar —que los verbos no compartan bits entre sí ni con otra válvula de la misma palabra— lo comprueban validate:mapping y el loader, que con un spec sostenido inválido NO arranca.",
+          "if": { "properties": { "sustained": { "const": true } }, "required": ["sustained"] },
+          "then": {
+            "required": ["mode"],
+            "properties": {
+              "mode": { "const": "bitmask" },
+              "commands": {
+                "minProperties": 2,
+                "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 65535 }
+              },
+              "latched": { "const": false }
+            },
+            "not": {
+              "anyOf": [
+                { "required": ["pulse"] },
+                { "required": ["rollbackValue"] },
+                { "required": ["sequences"] }
+              ]
+            }
+          },
+          "else": { "required": ["rollbackValue"] }
+        },
         {
           "description": "Un PULSO se limpia antes del read-back, así que NO puede confirmarse releyendo el valor escrito: su readBack debe apuntar al canal de ESTADO (confirmsWrittenValue:false + expectedValue).",
           "if": { "required": ["pulse"] },
@@ -271,12 +294,16 @@
         },
         "latched": {
           "type": "boolean",
-          "description": "true ⇒ la orden es SOSTENIDA: el valor se queda puesto y NO se hace rollback si el estado no confirma. Correcto cuando cada verbo define un estado eléctrico completo y su opuesto es el otro verbo (abrir = c0:1/c1:0, cerrar = c0:0/c1:1): deshacer un 'abrir' a 0/0 dejaría el actuador sin dirección, ni abierto ni cerrado, y sin que nadie lo pidiera. Excluyente con pulse."
+          "description": "true ⇒ la orden es SOSTENIDA: el valor se queda puesto y NO se hace rollback si el estado no confirma. Correcto cuando cada verbo define un estado eléctrico completo y su opuesto es el otro verbo (abrir = c0:1/c1:0, cerrar = c0:0/c1:1): deshacer un 'abrir' a 0/0 dejaría el actuador sin dirección, ni abierto ni cerrado, y sin que nadie lo pidiera. Excluyente con pulse. Es la versión para ÓRDENES COMPUESTAS (sequences, posiciones en absoluto); para un par de bits dentro de una palabra compartida, sustained."
+        },
+        "sustained": {
+          "type": "boolean",
+          "description": "true ⇒ SEÑAL SOSTENIDA en una palabra compartida. Integrador del PLC de La Vorágine, 2026-10-16, textual: «estas señales deben ser sostenidas, es decir que todo el tiempo debe quedar la señal de apertura o la señal de cierre, nunca las dos, siempre una de las dos». Cada verbo es una máscara de bits de target y la orden es UNA escritura read-modify-write, (actual & ~bitsDeLosOtrosVerbos) | bitsDelVerbo: el par pasa de un verbo al otro sin ningún instante en 1/1 ni en 0/0, y los bits de las demás válvulas de la palabra no se tocan. Después NO se suelta nunca: ni al terminar, ni si el estado no confirma, ni si algo falla. Exige mode bitmask y al menos dos verbos enteros de 1 a 65535 sin bits compartidos; prohíbe pulse, rollbackValue, sequences y latched (ver la regla en allOf). No se llama latched porque en este código «enclavar» es la avería del bit ENCLAVADO y, en el simulador, un PLC que se mueve con el flanco: lo contrario de lo que pide el integrador."
         },
         "mode": {
           "type": "string",
           "enum": ["absolute", "bitmask"],
-          "description": "Cómo aplicar el valor sobre el elemento. absolute (default): se escribe tal cual (pisa la palabra). bitmask: read-modify-write (activar = actual|valor, limpiar = actual&~valor) — OBLIGATORIO si la palabra concentra varios comandos, para no apagar bits ajenos."
+          "description": "Cómo aplicar el valor sobre el elemento. absolute (default): se escribe tal cual (pisa la palabra). bitmask: read-modify-write (activar = (actual & ~bitsDeLosOtrosVerbos) | valor, que apaga el verbo contrario de la MISMA válvula en la misma escritura; limpiar = actual&~valor) — OBLIGATORIO si la palabra concentra varios comandos, para no apagar bits ajenos."
         },
         "pulse": {
           "type": "object",
@@ -330,7 +357,7 @@
         },
         "rollbackValue": {
           "type": ["number", "boolean"],
-          "description": "Valor seguro a re-escribir si la confirmación falla (best-effort)."
+          "description": "Valor seguro a re-escribir si la confirmación falla (best-effort), y con el que se limpia un pulso en absolute. Obligatorio en todo spec SALVO en una orden sostenida (sustained), donde está PROHIBIDO: allí no se deshace nada, y volver a este valor dejaría la válvula sin señal."
         },
         "permission": {
           "type": "string",

@@ -60,7 +60,8 @@ export type MotivoProbe =
   | 'BUFFER_DE_OTRO_CANAL'
   | 'INDICE_FUERA_DE_RANGO'
   | 'HOLD_FUERA_DE_RANGO'
-  | 'VALOR_INVALIDO';
+  | 'VALOR_INVALIDO'
+  | 'SENAL_SOSTENIDA';
 
 export interface RechazoProbe {
   ok: false;
@@ -116,6 +117,28 @@ export function validarProbe(mapping: LoadedMapping, plantId: string, req: Probe
       ok: false,
       motivo: 'INDICE_FUERA_DE_RANGO',
       detalle: `${buffer.browseName} declara ${buffer.arrayLength} elementos: el último índice válido es ${buffer.arrayLength - 1}.`,
+    };
+  }
+
+  // Una palabra que manda válvulas de señal SOSTENIDA no se sondea. El probador escribe en ABSOLUTO,
+  // y la regla del integrador (La Vorágine, 2026-10-16) es que en esa palabra quede SIEMPRE puesto
+  // abrir o cerrar de cada válvula, nunca los dos y nunca ninguno: cualquier valor de prueba la
+  // rompería durante el sostenido aunque después se soltara. Y no hace falta: su codificación ya la
+  // entregó el integrador, que es justo lo que el probador sirve para averiguar.
+  const sostenidas = mapping.signals.filter(
+    (s) =>
+      s.plantId === plantId &&
+      s.writable &&
+      s.write?.sustained === true &&
+      s.write.target.channel === req.channel &&
+      s.write.target.sourceBuffer === req.sourceBuffer &&
+      s.write.target.index === req.index,
+  );
+  if (sostenidas.length > 0) {
+    return {
+      ok: false,
+      motivo: 'SENAL_SOSTENIDA',
+      detalle: `${req.sourceBuffer}[${req.index}] manda ${sostenidas.map((s) => s.label ?? s.domainKey).join(' y ')} con señal SOSTENIDA: siempre tiene que quedar puesto abrir o cerrar, nunca los dos ni ninguno, y una escritura de prueba en absoluto lo rompería. Para accionarlas está el mando normal, que respeta esa regla.`,
     };
   }
 
