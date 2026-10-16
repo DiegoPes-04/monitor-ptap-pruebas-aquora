@@ -1,44 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import { Platform, AppState } from 'react-native';
+import { AppState } from 'react-native';
 import type { AuthUser, Permission } from '@ptap/shared';
 import { hasPermission as checkPermission } from '@ptap/shared';
 import { setAuthToken, setOnUnauthorized } from '../services/api';
 import { resetSocket } from '../services/socket';
-
-const TOKEN_KEY = 'ptap_auth_token';
-const USER_KEY = 'ptap_auth_user';
-
-/**
- * Instante de expiración (ms epoch) del JWT, leyendo el `exp` del payload. NO verifica la firma
- * — eso es del backend en cada petición; aquí solo se lee el reloj de la sesión para que la app
- * cierre sola a la hora que el backend ya decidió (JWT_EXPIRES_IN, 8 h). null = sin exp legible;
- * en ese caso el cierre queda en manos del 401 del backend.
- */
-function tokenExpiryMs(token: string): number | null {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payload = JSON.parse(atob(b64)) as { exp?: number };
-    return typeof payload.exp === 'number' ? payload.exp * 1000 : null;
-  } catch {
-    return null;
-  }
-}
-
-const storage = {
-  getItem: (key: string) =>
-    Platform.OS === 'web'
-      ? Promise.resolve(localStorage.getItem(key))
-      : SecureStore.getItemAsync(key),
-  setItem: (key: string, value: string) =>
-    Platform.OS === 'web'
-      ? Promise.resolve(localStorage.setItem(key, value))
-      : SecureStore.setItemAsync(key, value),
-  deleteItem: (key: string) =>
-    Platform.OS === 'web'
-      ? Promise.resolve(localStorage.removeItem(key))
-      : SecureStore.deleteItemAsync(key),
-};
+// Claves, almacenamiento y lectura del `exp` viven en `session-store` para que la tarea de segundo
+// plano —que corre sin React— pueda leer la misma sesión. Ver ese módulo.
+import { TOKEN_KEY, USER_KEY, storage, tokenExpiryMs } from '../services/session-store';
 
 interface AuthContextType {
   token: string | null;

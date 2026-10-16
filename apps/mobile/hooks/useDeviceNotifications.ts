@@ -16,8 +16,9 @@ import {
 /**
  * Notificaciones del sistema operativo: permiso + sincronización.
  *
- * Se monta una sola vez, en la cáscara de `(app)` (o sea, ya con sesión: sin token la consulta a la
- * bandeja daría 401).
+ * Se monta en la cáscara de `(app)` (la franja de permiso) y en la tarjeta de Ajustes, siempre ya con
+ * sesión: sin token la consulta a la bandeja daría 401. Que haya dos instancias no duplica avisos:
+ * `syncNotificationsToDevice` comparte la sincronización en curso entre todos los que la piden.
  *
  * **No pide el permiso solo.** Un `requestPermission()` automático al arrancar lo rechazan los
  * navegadores y Android lo cuenta como denegado — y una vez denegado, volver a pedirlo ya no
@@ -45,8 +46,17 @@ export function useDeviceNotifications(): {
   const [permission, setPermission] = useState<PermissionState>('undetermined');
   const supported = isSupported();
 
+  // El permiso se vuelve a leer CADA VEZ que la app pasa a primer plano, con o sin permiso actual.
+  // Quien lo había denegado lo concede desde los ajustes del sistema («Abrir ajustes» en la tarjeta)
+  // y vuelve: sin esta relectura la app seguía creyéndolo denegado hasta reiniciarla, y la tarea de
+  // fondo no se registraba. También cubre lo contrario: si lo quita allí, la app deja de sincronizar
+  // desde primer plano.
   useEffect(() => {
     void getPermission().then(setPermission);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void getPermission().then(setPermission);
+    });
+    return () => sub.remove();
   }, []);
 
   // Con permiso concedido: registrar la tarea periódica y sincronizar ya, para no esperar a que

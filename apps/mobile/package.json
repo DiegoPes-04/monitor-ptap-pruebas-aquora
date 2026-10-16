@@ -1,7 +1,7 @@
 {
   "name": "@ptap/mobile",
   "version": "1.0.0",
-  "main": "expo-router/entry",
+  "main": "index.js",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "@ptap/shared": "*",
@@ -39,7 +39,7 @@
     "web": "expo start --web",
     "web:fast": "expo start --web --clear",
     "lint": "expo lint",
-    "test": "node --import tsx --test services/signal-kind.test.ts services/valves.test.ts services/signal-groups.test.ts services/tanks.test.ts services/app-release.test.ts services/novedades.test.ts services/mapping-edit.test.ts services/mapping-mando.test.ts",
+    "test": "node --import tsx --test services/signal-kind.test.ts services/valves.test.ts services/signal-groups.test.ts services/tanks.test.ts services/app-release.test.ts services/novedades.test.ts services/mapping-edit.test.ts services/mapping-mando.test.ts services/notification-pointer.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prebuild:android": "expo prebuild -p android",
     "build:android": "expo prebuild -p android && cd android && gradlew.bat assembleRelease"

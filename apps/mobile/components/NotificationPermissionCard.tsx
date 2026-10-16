@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../constants/colors';
 import { useDeviceNotifications } from '../hooks/useDeviceNotifications';
@@ -43,16 +43,40 @@ export function NotificationPermissionCard() {
   }
 
   if (permission === 'denied') {
+    // En el teléfono se puede llevar a la persona DIRECTO a los ajustes de la app: antes solo se le
+    // explicaba dónde buscarlos, y quien había dicho «no» una vez no tenía un camino de vuelta a la
+    // vista. Al volver con el permiso concedido, `useDeviceNotifications` lo relee y esta tarjeta
+    // pasa sola a «Avisos activados». En web no hay equivalente (ningún navegador deja abrir sus
+    // ajustes desde una página), así que ahí se mantiene la explicación.
+    const nativo = Platform.OS !== 'web';
     return (
       <View style={[styles.card, styles.cardMuted]}>
         <Ionicons name="notifications-off-outline" size={20} color={Colors.warning} />
         <View style={styles.body}>
           <Text style={styles.title}>Avisos bloqueados</Text>
-          <Text style={styles.text}>
-            Los rechazaste antes y el sistema ya no vuelve a preguntar. Para activarlos hay que
-            permitirlos a mano en los ajustes del navegador o del teléfono, en los permisos de esta
-            aplicación.
-          </Text>
+          {nativo ? (
+            <>
+              <Text style={styles.text}>
+                Los rechazaste antes y el sistema ya no vuelve a preguntar. Para activarlos, abre
+                los ajustes de esta aplicación y permite las notificaciones.
+              </Text>
+              <TouchableOpacity
+                style={styles.enlace}
+                onPress={() => void Linking.openSettings().catch(() => undefined)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Abrir los ajustes de la aplicación para permitir las notificaciones"
+              >
+                <Text style={styles.enlaceTexto}>Abrir ajustes</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.text}>
+              Los rechazaste antes y el sistema ya no vuelve a preguntar. Para activarlos hay que
+              permitirlos a mano en los ajustes del navegador o del teléfono, en los permisos de esta
+              aplicación.
+            </Text>
+          )}
         </View>
       </View>
     );
@@ -95,4 +119,7 @@ const styles = StyleSheet.create({
   body: { flex: 1, gap: 3 },
   title: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
   text: { fontSize: 12.5, color: Colors.textSecondary, lineHeight: 17 },
+  // Alto de objetivo táctil holgado: se usa con guantes en planta.
+  enlace: { alignSelf: 'flex-start', paddingVertical: 10, marginTop: 2 },
+  enlaceTexto: { fontSize: 14, fontWeight: '700', color: Colors.primary },
 });

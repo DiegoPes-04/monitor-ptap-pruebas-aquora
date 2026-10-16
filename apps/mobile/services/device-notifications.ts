@@ -46,12 +46,20 @@ export function unsupportedReason(): string | null {
   return 'Este navegador no admite notificaciones.';
 }
 
+/**
+ * Traduce el estado de `expo-notifications` al nuestro. Compartido por la consulta y la petición
+ * para que ambas digan lo mismo del mismo permiso.
+ */
+function desdeEstadoNativo(status: string): PermissionState {
+  return status === 'granted' ? 'granted' : status === 'denied' ? 'denied' : 'undetermined';
+}
+
 export async function getPermission(): Promise<PermissionState> {
   if (!isSupported()) return 'unsupported';
   if (isWeb) return window.Notification.permission as PermissionState;
   const { getPermissionsAsync } = await nativeModule();
   const { status } = await getPermissionsAsync();
-  return status === 'granted' ? 'granted' : status === 'denied' ? 'denied' : 'undetermined';
+  return desdeEstadoNativo(status);
 }
 
 /**
@@ -69,12 +77,20 @@ export async function requestPermission(): Promise<PermissionState> {
   }
   const { requestPermissionsAsync } = await nativeModule();
   const { status } = await requestPermissionsAsync();
-  return status === 'granted' ? 'granted' : 'denied';
+  // `undetermined` se respeta, no se convierte en `denied`: en Android 13+ cerrar el diálogo sin
+  // elegir deja el permiso sin decidir y se puede volver a pedir. Darlo por denegado escondía la
+  // franja de «Activar» y mandaba a la persona a los ajustes del sistema sin necesidad.
+  return desdeEstadoNativo(status);
 }
 
 /**
  * Canal de Android. Obligatorio desde Android 8: sin canal, el sistema descarta la notificación
- * sin avisar. Importancia alta para que aparezca como aviso emergente, no solo en la lista.
+ * sin avisar.
+ *
+ * Su importancia es DEFAULT, no alta: suena y aparece en el panel, pero no se despliega como aviso
+ * emergente sobre la pantalla. Lo emergente queda para `CANAL_CRITICO`. Y no se puede subir aquí:
+ * los canales de Android son inmutables una vez creados (ver abajo), así que cambiar este valor no
+ * afectaría a ningún teléfono que ya tenga la app instalada.
  */
 export const CANAL_NORMAL = 'ptap-alertas';
 /**
@@ -147,6 +163,10 @@ function pitido(): void {
 /**
  * Muestra un aviso en el panel del sistema. Silencioso si no hay permiso: nunca lanza.
  *
+ * Devuelve `true` solo si el sistema aceptó la notificación; `false` sin soporte, sin permiso o si
+ * publicarla falló. Quien la llama lo necesita para no dar por anunciado lo que nunca salió: de eso
+ * depende que avance el puntero de `notification-sync.ts` y que se recuerde el aviso de versión.
+ *
  * `critica` cambia dos cosas, y las dos importan:
  *  - va por el canal de importancia MÁXIMA, con su propia vibración;
  *  - es PERSISTENTE (`sticky` en Android, `requireInteraction` en web): no se descarta sola. Un
@@ -157,10 +177,10 @@ export async function presentNotification(
   body: string,
   data?: Record<string, unknown>,
   critica = false,
-): Promise<void> {
+): Promise<boolean> {
   try {
-    if (!isSupported()) return;
-    if ((await getPermission()) !== 'granted') return;
+    if (!isSupported()) return false;
+    if ((await getPermission()) !== 'granted') return false;
 
     if (isWeb) {
       const n = new window.Notification(title, {
@@ -185,10 +205,16 @@ export async function presentNotification(
         };
       }
       if (critica) pitido();
-      return;
+      return true;
     }
+    // Los avisos de planta (`tag` = `n-<id>`) usan el tag como identificador de la notificación. El
+    // puntero de `notification-sync` prefiere repetir un aviso a perderlo, y con un identificador
+    // fijo Android REEMPLAZA la notificación anterior en vez de apilar otra igual. El resto (resumen,
+    // actualización) conserva el identificador aleatorio de siempre.
+    const tag = typeof data?.tag === 'string' ? data.tag : null;
     const Notifications = await nativeModule();
     await Notifications.scheduleNotificationAsync({
+      ...(tag?.startsWith('n-') ? { identifier: tag } : {}),
       content: {
         title,
         body,
@@ -200,7 +226,10 @@ export async function presentNotification(
       },
       trigger: null, // null = inmediata
     });
+    return true;
   } catch {
-    // Una notificación que no se puede mostrar no debe romper nada de lo que la invocó.
+    // Una notificación que no se puede mostrar no debe romper nada de lo que la invocó; basta con
+    // decirlo, para que no se dé por entregada.
+    return false;
   }
 }
