@@ -1,0 +1,40 @@
+{
+  "name": "valvulas-de-prueba",
+  "description": "Escenario por defecto de `npm run dev:sim`. Mapping de PRUEBA con 1 válvula (sim-una), 2 y 3 válvulas en la MISMA palabra INT_OUT (sim-dos, sim-tres: bits 0/1, 2/3, 4/5) y válvulas en buffers distintos y bitOut (sim-buffers). Tiempos realistas: MSG maestro→local de 8 s (medido en La Sirena), recorrido supuesto de 30 s, el PLC local solo mueve mientras el bit está sostenido (hold). Con el sostenido de 45 s del mapping, el PLC local ve el bit entre ~37 y ~53 s.",
+  "mapping": "mappings/valvulas-de-prueba.json",
+  "ioLatencyMs": 50,
+  "defaults": {
+    "travelMs": 30000,
+    "latchMode": "hold",
+    "initialState": "closed",
+    "feedback": "auto",
+    "flowOpen": 12.5,
+    "msgCycleMs": 8000,
+    "msgPhaseMs": 0
+  },
+  "plants": {
+    "sim-buffers": {
+      "_nota": "Fase distinta para que no todas las plantas muestreen en el mismo instante.",
+      "msgPhaseMs": 3000
+    }
+  },
+  "valves": {
+    "sim-tres/valve3": {
+      "_nota": "En la misma palabra, una válvula que enclava con el FLANCO, para comparar con sus vecinas en hold.",
+      "latchMode": "latch",
+      "travelMs": 20000
+    },
+    "sim-buffers/valve2": {
+      "_nota": "Como La Vorágine: INT_IN[1] valía 1025 en reposo y el sostenido se suelta cuando vale 1.",
+      "untilIdleValue": 1025
+    },
+    "sim-una/valve1": {
+      "_nota": "Un elemento de entrada declarado a mano: INT_IN_SIM_UNA[5] = 1 abierta, 2 cerrada, 3 moviéndose, 4 a medias, 9 en error.",
+      "feedbackElements": [{ "element": "INT_IN_SIM_UNA[5]", "open": 1, "closed": 2, "moving": 3, "mid": 4, "error": 9 }]
+    }
+  },
+  "initialValues": {
+    "sim-una/REAL_IN_SIM_UNA[2]": 1.8,
+    "sim-tres/INT_OUT_SIM_TRES[1]": 0
+  }
+}

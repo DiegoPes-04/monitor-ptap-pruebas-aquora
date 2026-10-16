@@ -2055,16 +2055,16 @@
           "confidence": "confirmed",
           "writable": true,
           "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-05, con captura de RSLogix. El mando de la valvula de Carbonero esta en INT_OUT_CARBONERO[0]: bit0 (valor 1) = APERTURA, bit1 (valor 2) = CIERRE. La comunicacion entre el PLC maestro y el PLC local de Carbonero ya esta establecida. Sustituye al open:4096 HEREDADO de Voragine, que nunca se valido aqui, y anade close. NO probado todavia en campo. OJO: la app NO tiene un bloqueo propio de Carbonero; hoy no ofrece mando porque no conoce el estado (sin palabra de estado ni caudal usable), pero si inletFlow1 vuelve a ser usable ofrecera el verbo contrario al estado deducido de ESE caudal, que nadie ha confirmado que corresponda a esta valvula. mode bitmask = read-modify-write, para no pisar los demas bits de la palabra. EXCLUSION: abrir y cerrar a 1 a la vez es estado de ERROR; al activar un verbo, WriteService limpia el bit del otro en la MISMA escritura (la palabra pasa de 2 a 1 o de 1 a 2 sin pasar por 3). TEMPORIZACION PROVISIONAL, PENDIENTE DE CONFIRMAR CON EL INTEGRADOR, que no informo si el PLC local enclava con un pulso o hay que sostener el bit, ni cuanto tarda la valvula en recorrer. Se elige la opcion conservadora: sostener 45 s por reloj y limpiar siempre, igual que La Sirena. Por que: (1) la MSG maestro->local cicla cada ~8 s (medido en Sirena, docs/archivo/PRUEBA_VALVULA_SIRENA.md): el pulso de 300 ms que habia podia ponerse y quitarse entre dos ciclos y no llegar nunca al PLC local; 45 s cubre ~5 ciclos; (2) las dos valvulas verificadas en campo (Voragine y Sirena, 2026-08-15) necesitaron la senal SOSTENIDA, y el pulso corto dejaba la maniobra a medias; (3) si el PLC local enclava con el flanco, sostener no cambia nada. Sin pulse.until: no se conoce ninguna realimentacion. El tope no sube de 45 s: el fetch de la app no fija timeout y hereda el de la plataforma (~60 s en iOS). Por el ciclo de la MSG, el PLC local ve el bit puesto entre ~37 y ~53 s. READ-BACK: INT_IN_CARBONERO[0] SIN semantica verificada (el integrador no dijo si hay bit de estado). Se QUITO el expectedValue 16385: venia de la convencion de Voragine, nunca se observo aqui (ultimo valor conocido de INT_IN[0]: 1024 = bit10) y, con close, habria dado por CERRADA una palabra que en esa convencion significa abierta. Sin expectedValue, WriteService compara INT_IN[0] con el valor del verbo (1 o 2): salvo que lea exactamente eso, el resultado es sent (ambar) cuando el eco confirma la escritura, y nunca failed por culpa del estado. stateVerified sigue en false. Revertir: commands {open:4096}, pulse {holdMs:300}, readBack.expectedValue 16385 y quitar este _riesgo.",
             "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_CARBONERO", "index": 0 },
-            "commands": { "open": 4096 },
+            "commands": { "open": 1, "close": 2 },
             "mode": "bitmask",
-            "pulse": { "holdMs": 300 },
+            "pulse": { "holdMs": 45000 },
             "readBack": {
               "channel": "intIn",
               "sourceBuffer": "INT_IN_CARBONERO",
               "index": 0,
               "confirmsWrittenValue": false,
-              "expectedValue": 16385,
               "stateVerified": false
             },
             "timeoutMs": 5000,

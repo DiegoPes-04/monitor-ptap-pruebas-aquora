@@ -1,0 +1,18 @@
+{
+  "name": "enclavamiento-latch",
+  "description": "El mismo mapping de prueba, pero con el PLC local ENCLAVANDO con el flanco (latch): basta con que la MSG vea el bit una vez para que la válvula recorra hasta el tope, aunque el bit se suelte antes. Sirve para comparar con valvulas-de-prueba (hold) la duda abierta con el integrador.",
+  "mapping": "mappings/valvulas-de-prueba.json",
+  "ioLatencyMs": 50,
+  "defaults": {
+    "travelMs": 30000,
+    "latchMode": "latch",
+    "initialState": "closed",
+    "feedback": "auto",
+    "flowOpen": 12.5,
+    "msgCycleMs": 8000,
+    "msgPhaseMs": 0
+  },
+  "valves": {
+    "sim-buffers/valve2": { "untilIdleValue": 1025 }
+  }
+}

@@ -217,6 +217,14 @@ function resolvePath(explicit?: string): string {
   return found;
 }
 
+/**
+ * La ruta que `loadMapping()` cargaría con estos argumentos y este entorno. El simulador la usa para
+ * comprobar que un escenario se está ejecutando contra el mapping que exige (ver sim-scenario.ts).
+ */
+export function resolverRutaDelMapping(explicitPath?: string): string {
+  return resolvePath(explicitPath);
+}
+
 interface RawWriteSpec {
   target?: { channel?: string; sourceBuffer?: string; index?: number };
   commands?: Record<string, number | boolean>;

@@ -41,6 +41,17 @@ const UNVERIFIED_READBACK_MS = 600;
 const HOLD_POLL_MS = 500;
 
 /**
+ * Bits de los OTROS verbos de la misma válvula, sin los del verbo que se activa: lo que la exclusión
+ * abrir/cerrar tiene que apagar (ver `applyValue`). Sale del mapping, no de una lista en el código
+ * (regla 2): en Carbonero son 1/2 y en La Vorágine 4096/8192. Los booleanos no tienen bits.
+ */
+function bitsDeLosOtrosVerbos(commands: Record<string, number | boolean>, value: number): number {
+  let mascara = 0;
+  for (const v of Object.values(commands)) if (typeof v === 'number' && v !== value) mascara |= v;
+  return mascara & ~value & 0xffff;
+}
+
+/**
  * WriteService (Fase 5): único punto que ejecuta comandos de escritura al PLC.
  *
  * PRECONDICIÓN DURA (regla 9): rechaza TODO si OPCUA_WRITES_ENABLED=false o si la sesión
@@ -101,6 +112,40 @@ export class WriteService {
   /** Libera lo reservado. Se llama SIEMPRE desde un `finally`. */
   liberar(claves: string[]): void {
     for (const c of claves) this.enCurso.delete(c);
+  }
+
+  /**
+   * Turnos por ELEMENTO del buffer (`plantId/canal/buffer[índice]`): la cola de quien está haciendo un
+   * read-modify-write sobre esa palabra.
+   *
+   * `enCurso` reserva la VÁLVULA, no la palabra, así que dos válvulas de la misma palabra (Carbonero
+   * con 2 o 3 válvulas en INT_OUT[0]) corren a la vez — y debe ser así: la orden de B no puede esperar
+   * los 45 s del sostenido de A. Pero la activación (leer → `applyValue` → escribir) y la limpieza del
+   * pulso (leer → quitar el bit → escribir) son DOS idas al PLC, y entre ellas cabe la escritura de la
+   * otra válvula. Demostrado contra el simulador con 100 ms por petición
+   * (test/sim-valvulas-e2e.test.ts): A lee, B escribe, A escribe lo que leyó → el bit de B se BORRA y
+   * su orden se pierde; o B lee, A limpia, B escribe lo que leyó → el bit de A RESUCITA y se queda
+   * puesto para siempre, que es la bobina energizada sin que nadie lo sepa.
+   *
+   * El turno cubre solo esas secciones (milisegundos, nunca el sostenido): la orden de B espera a lo
+   * sumo una ida y vuelta de la de A. Se suelta SIEMPRE desde un `finally`.
+   */
+  private readonly turnos = new Map<string, Promise<void>>();
+
+  private async turnoDe(el: BufferElementTarget): Promise<() => void> {
+    const clave = `${el.plantId}/${el.channel}/${el.sourceBuffer}[${el.index}]`;
+    const anterior = this.turnos.get(clave) ?? Promise.resolve();
+    let soltar: () => void = () => undefined;
+    const propio = new Promise<void>((resolve) => {
+      soltar = resolve;
+    });
+    const cola = anterior.then(() => propio);
+    this.turnos.set(clave, cola);
+    await anterior;
+    return () => {
+      soltar();
+      if (this.turnos.get(clave) === cola) this.turnos.delete(clave);
+    };
   }
 
   async execute(plantId: string, req: CommandRequest, actor: CommandActor): Promise<CommandResult> {
@@ -213,21 +258,55 @@ export class WriteService {
 
     let result: CommandResult;
     try {
-      // 7a) La ESCRITURA, aislada: si falla aquí, el motivo es WRITE_REJECTED (no se escribió),
-      // nunca READBACK_UNCONFIRMED (que significa "se escribió y el equipo no respondió").
+      // 7a + 7b EN TURNO sobre la palabra de mando (ver `turnoDe`): leer, escribir y releer el eco sin
+      // que la orden de otra válvula de la MISMA palabra se cuele entre medias. Sin el turno, el eco
+      // además podía leer la escritura de la otra válvula y dar por no verificada una orden que sí salió.
+      const soltarTurno = await this.turnoDe(targetEl);
+      let rechazo: { err: unknown } | null = null;
       try {
-        const prev = await this.adapter.readBufferElement(targetEl);
-        base.previousValue = prev.value;
-        for (const paso of pasos) {
-          // Los pasos de una SECUENCIA se escriben en absoluto: ahí la posición del array ES el
-          // canal físico, no un bit dentro de una palabra compartida. En una orden simple se
-          // conserva la semántica de `mode` (bitmask = activar sin pisar los bits ajenos).
-          const toWrite = secuencia ? paso.value : this.applyValue(write, prev.value, paso.value);
-          await this.adapter.writeBufferElement(el(paso.index), toWrite);
-          escritos.push({ index: paso.index, value: toWrite });
+        // 7a) La ESCRITURA, aislada: si falla aquí, el motivo es WRITE_REJECTED (no se escribió),
+        // nunca READBACK_UNCONFIRMED (que significa "se escribió y el equipo no respondió").
+        try {
+          const prev = await this.adapter.readBufferElement(targetEl);
+          base.previousValue = prev.value;
+          for (const paso of pasos) {
+            // Los pasos de una SECUENCIA se escriben en absoluto: ahí la posición del array ES el
+            // canal físico, no un bit dentro de una palabra compartida. En una orden simple se
+            // conserva la semántica de `mode` (bitmask = activar sin pisar los bits ajenos).
+            const toWrite = secuencia ? paso.value : this.applyValue(write, prev.value, paso.value);
+            await this.adapter.writeBufferElement(el(paso.index), toWrite);
+            escritos.push({ index: paso.index, value: toWrite });
+          }
+          base.writtenValue = escritos.find((e) => e.index === write.target.index)?.value ?? null;
+        } catch (err) {
+          rechazo = { err };
         }
-        base.writtenValue = escritos.find((e) => e.index === write.target.index)?.value ?? null;
-      } catch (err) {
+
+        // 7b) ECO INSTANTÁNEO del canal de comando: prueba, en el momento, que el valor SÍ quedó
+        // escrito — independiente del canal de estado (que necesita al equipo respondiendo).
+        // En una orden compuesta se comprueban TODOS los pasos: si el sentido no quedó puesto, el
+        // equipo no se va a mover por mucho que la habilitación sí esté, y decir "verificado" con
+        // medio comando escrito sería exactamente el engaño que este eco existe para evitar.
+        if (!rechazo) {
+          try {
+            let todosOk = true;
+            for (const e of escritos) {
+              const echo = await this.adapter.readBufferElement(el(e.index));
+              if (e.index === write.target.index) base.writeEcho = echo.value;
+              if (echo.value !== e.value) todosOk = false;
+            }
+            base.writeVerified = todosOk;
+          } catch {
+            base.writeEcho = null;
+            base.writeVerified = null; // no se pudo comprobar; no se afirma nada
+          }
+        }
+      } finally {
+        soltarTurno();
+      }
+
+      if (rechazo) {
+        const { err } = rechazo;
         this.logger.error(`write de ${req.command}/${req.target} RECHAZADO: ${err instanceof Error ? err.message : err}`);
         const rejected: CommandResult = { ...base, status: 'failed', reason: FAIL.WRITE_REJECTED };
         await this.repo.finalize(reservation.id, {
@@ -236,24 +315,6 @@ export class WriteService {
           interlockSequence: rejected.interlockSequence,
         });
         return this.audit(actor, req, rejected);
-      }
-
-      // 7b) ECO INSTANTÁNEO del canal de comando: prueba, en el momento, que el valor SÍ quedó
-      // escrito — independiente del canal de estado (que necesita al equipo respondiendo).
-      // En una orden compuesta se comprueban TODOS los pasos: si el sentido no quedó puesto, el
-      // equipo no se va a mover por mucho que la habilitación sí esté, y decir "verificado" con
-      // medio comando escrito sería exactamente el engaño que este eco existe para evitar.
-      try {
-        let todosOk = true;
-        for (const e of escritos) {
-          const echo = await this.adapter.readBufferElement(el(e.index));
-          if (e.index === write.target.index) base.writeEcho = echo.value;
-          if (echo.value !== e.value) todosOk = false;
-        }
-        base.writeVerified = todosOk;
-      } catch {
-        base.writeEcho = null;
-        base.writeVerified = null; // no se pudo comprobar; no se afirma nada
       }
 
       // 7b-bis) PULSO: sostener y LIMPIAR SIEMPRE, en orden inverso al de escritura. Un comando de
@@ -405,12 +466,21 @@ export class WriteService {
   /**
    * Valor a ESCRIBIR para activar el comando.
    *  - `absolute`: el valor del mapping tal cual.
-   *  - `bitmask`:  `actual | valor` → activa los bits del comando y CONSERVA los demás de la palabra.
+   *  - `bitmask`:  `(actual & ~otrosVerbos) | valor` → activa los bits del comando, APAGA los de los
+   *    demás verbos de la misma válvula y CONSERVA el resto de la palabra.
    * Si el valor actual no es numérico (o es booleano) no hay aritmética de bits posible: absoluto.
+   *
+   * Apagar los otros verbos es la EXCLUSIÓN abrir/cerrar. En Carbonero abrir = bit0 y cerrar = bit1
+   * de `INT_OUT[0]`, y los dos a 1 a la vez es el estado que el PLC declara ERROR (integrador,
+   * 2026-10-05). Con `actual | valor` a secas, una palabra que todavía trajera el bit contrario —un
+   * cierre de pulso que falló, una escritura ajena— quedaba con las dos direcciones energizadas. Va en
+   * la MISMA escritura a propósito: la palabra pasa de un sentido al otro sin ningún instante con los
+   * dos bits puestos. Un verbo que vale 0 no energiza nada y se aplica como antes.
    */
   private applyValue(write: WriteSpec, current: CommandValue, value: number | boolean): number | boolean {
     if (write.mode !== 'bitmask' || typeof value !== 'number' || typeof current !== 'number') return value;
-    return (current | value) & 0xffff; // Int16 del PLC
+    const contrarios = (value & 0xffff) === 0 ? 0 : bitsDeLosOtrosVerbos(write.commands, value);
+    return ((current & ~contrarios) | value) & 0xffff; // Int16 del PLC
   }
 
   /**
@@ -467,8 +537,12 @@ export class WriteService {
    * Cierra el pulso: en `bitmask` limpia SOLO los bits del comando (`actual & ~valor`), releyendo el
    * valor por si otro proceso tocó la palabra durante el pulso; en `absolute` escribe `rollbackValue`.
    * Best-effort: si falla, se registra — dejar un bit puesto es peor que un log ruidoso.
+   *
+   * En TURNO sobre el elemento (ver `turnoDe`): releer no basta si entre la lectura y la escritura cae
+   * la orden de otra válvula de la misma palabra.
    */
   private async clearPulse(targetEl: BufferElementTarget, write: WriteSpec, value: number | boolean): Promise<void> {
+    const soltarTurno = await this.turnoDe(targetEl);
     try {
       if (write.mode === 'bitmask' && typeof value === 'number') {
         const now = await this.adapter.readBufferElement(targetEl);
@@ -481,6 +555,8 @@ export class WriteService {
       this.logger.error(
         `NO se pudo cerrar el pulso en ${targetEl.sourceBuffer}[${targetEl.index}] — puede quedar un bit ACTIVO: ${err instanceof Error ? err.message : err}`,
       );
+    } finally {
+      soltarTurno();
     }
   }
 

@@ -10,6 +10,7 @@
     "start": "npm run dev:api",
     "dev:mobile": "npm run start -w @ptap/mobile",
     "dev:api": "npm run start:dev -w @ptap/api",
+    "dev:sim": "npm run dev:sim -w @ptap/api --",
     "build": "npm run build -w @ptap/shared && npm run build -w @ptap/api",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",

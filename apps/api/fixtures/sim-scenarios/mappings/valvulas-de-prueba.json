@@ -1,0 +1,885 @@
+{
+  "version": "1.0.0",
+  "protocolVersion": "v2",
+  "dtoVersion": "v1",
+  "generatedFrom": {
+    "simulationOnly": true,
+    "purpose": "Ensayar en local asignaciones de bits de valvulas (1, 2 y 3 valvulas por palabra, buffers distintos, bitOut) contra el simulador, sin VPN ni PLC.",
+    "usedBy": [
+      "apps/api/fixtures/sim-scenarios/*.json",
+      "apps/api/test/sim-*.test.ts"
+    ]
+  },
+  "notes": [
+    "Mapping de PRUEBA. Ninguna planta ni bit de este archivo existe en el PLC real.",
+    "sim-una: 1 valvula, bit0 abre / bit1 cierra en INT_OUT[0] (la codificacion de Carbonero), con read-back verificado para ejercitar el camino confirmado.",
+    "sim-dos: 2 valvulas en la MISMA palabra INT_OUT[0]: A bits 0/1, B bits 2/3.",
+    "sim-tres: 3 valvulas en la MISMA palabra INT_OUT[0]: A bits 0/1, B bits 2/3, C bits 4/5.",
+    "sim-buffers: valvulas en buffers distintos: absoluta 1/2 (La Sirena), mascara 4096/8192 en otro INT_OUT con pulse.until (La Voragine) y dos bobinas en bitOut con orden compuesta."
+  ],
+  "plants": [
+    {
+      "plantId": "sim-una",
+      "displayName": "SIM · 1 válvula",
+      "displayNameProvisional": true,
+      "opcBuffers": {
+        "realIn": [
+          {
+            "browseName": "REAL_IN_SIM_UNA",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.REAL_IN_SIM_UNA"
+            },
+            "arrayLength": 10,
+            "dataType": "Float"
+          }
+        ],
+        "intIn": [
+          {
+            "browseName": "INT_IN_SIM_UNA",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_IN_SIM_UNA"
+            },
+            "arrayLength": 10,
+            "dataType": "Int16"
+          }
+        ],
+        "intOut": [
+          {
+            "browseName": "INT_OUT_SIM_UNA",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_OUT_SIM_UNA"
+            },
+            "arrayLength": 20,
+            "dataType": "Int16"
+          }
+        ]
+      },
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "inferred"
+      },
+      "signals": [
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_UNA",
+          "index": 0,
+          "domainKey": "valve1",
+          "label": "Válvula 1 (sim)",
+          "flowDomainKey": "outletFlow1",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_UNA",
+              "index": 0
+            },
+            "commands": {
+              "open": 1,
+              "close": 2
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_UNA",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_UNA",
+          "index": 0,
+          "domainKey": "valve1State",
+          "label": "Estado válvula 1 (sim)",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 0,
+          "domainKey": "outletFlow1",
+          "label": "Caudal de salida (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 1,
+          "domainKey": "inletFlow1",
+          "label": "Caudal de entrada (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 2,
+          "domainKey": "tank1Level",
+          "label": "Nivel tanque 1 (sim)",
+          "unit": "m",
+          "min": 0,
+          "max": 5,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "plantId": "sim-dos",
+      "displayName": "SIM · 2 válvulas, misma palabra",
+      "displayNameProvisional": true,
+      "opcBuffers": {
+        "realIn": [
+          {
+            "browseName": "REAL_IN_SIM_DOS",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.REAL_IN_SIM_DOS"
+            },
+            "arrayLength": 10,
+            "dataType": "Float"
+          }
+        ],
+        "intIn": [
+          {
+            "browseName": "INT_IN_SIM_DOS",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_IN_SIM_DOS"
+            },
+            "arrayLength": 10,
+            "dataType": "Int16"
+          }
+        ],
+        "intOut": [
+          {
+            "browseName": "INT_OUT_SIM_DOS",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_OUT_SIM_DOS"
+            },
+            "arrayLength": 20,
+            "dataType": "Int16"
+          }
+        ]
+      },
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "inferred"
+      },
+      "signals": [
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_DOS",
+          "index": 0,
+          "domainKey": "valve1",
+          "label": "Válvula A (bits 0/1)",
+          "flowDomainKey": "outletFlow1",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_DOS",
+              "index": 0
+            },
+            "commands": {
+              "open": 1,
+              "close": 2
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_DOS",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_DOS",
+          "index": 1,
+          "domainKey": "valve2",
+          "label": "Válvula B (bits 2/3)",
+          "flowDomainKey": "outletFlow2",
+          "_nota": "ANCLA, NO MANDO: esta valvula manda por INT_OUT_SIM_DOS[0] (write.target), compartida con las demas. La senal se ancla en otro indice porque validate-mapping rechaza dos senales en el mismo canal[indice]; la app no usa el valor de la senal de valvula para deducir el estado.",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_DOS",
+              "index": 0
+            },
+            "commands": {
+              "open": 4,
+              "close": 8
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_DOS",
+              "index": 1,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_DOS",
+          "index": 0,
+          "domainKey": "valve1State",
+          "label": "Estado válvula A",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_DOS",
+          "index": 1,
+          "domainKey": "valve2State",
+          "label": "Estado válvula B",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 0,
+          "domainKey": "outletFlow1",
+          "label": "Caudal válvula A",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 1,
+          "domainKey": "outletFlow2",
+          "label": "Caudal válvula B",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 2,
+          "domainKey": "inletFlow1",
+          "label": "Caudal de entrada (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "plantId": "sim-tres",
+      "displayName": "SIM · 3 válvulas, misma palabra",
+      "displayNameProvisional": true,
+      "opcBuffers": {
+        "realIn": [
+          {
+            "browseName": "REAL_IN_SIM_TRES",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.REAL_IN_SIM_TRES"
+            },
+            "arrayLength": 10,
+            "dataType": "Float"
+          }
+        ],
+        "intIn": [
+          {
+            "browseName": "INT_IN_SIM_TRES",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_IN_SIM_TRES"
+            },
+            "arrayLength": 10,
+            "dataType": "Int16"
+          }
+        ],
+        "intOut": [
+          {
+            "browseName": "INT_OUT_SIM_TRES",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_OUT_SIM_TRES"
+            },
+            "arrayLength": 20,
+            "dataType": "Int16"
+          }
+        ]
+      },
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "inferred"
+      },
+      "signals": [
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_TRES",
+          "index": 0,
+          "domainKey": "valve1",
+          "label": "Válvula A (bits 0/1)",
+          "flowDomainKey": "outletFlow1",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_TRES",
+              "index": 0
+            },
+            "commands": {
+              "open": 1,
+              "close": 2
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_TRES",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_TRES",
+          "index": 1,
+          "domainKey": "valve2",
+          "label": "Válvula B (bits 2/3)",
+          "flowDomainKey": "outletFlow2",
+          "_nota": "ANCLA, NO MANDO: esta valvula manda por INT_OUT_SIM_TRES[0] (write.target), compartida con las demas. La senal se ancla en otro indice porque validate-mapping rechaza dos senales en el mismo canal[indice]; la app no usa el valor de la senal de valvula para deducir el estado.",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_TRES",
+              "index": 0
+            },
+            "commands": {
+              "open": 4,
+              "close": 8
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_TRES",
+              "index": 1,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_TRES",
+          "index": 2,
+          "domainKey": "valve3",
+          "label": "Válvula C (bits 4/5)",
+          "flowDomainKey": "outletFlow3",
+          "_nota": "ANCLA, NO MANDO: esta valvula manda por INT_OUT_SIM_TRES[0] (write.target), compartida con las demas. La senal se ancla en otro indice porque validate-mapping rechaza dos senales en el mismo canal[indice]; la app no usa el valor de la senal de valvula para deducir el estado.",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_TRES",
+              "index": 0
+            },
+            "commands": {
+              "open": 16,
+              "close": 32
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_TRES",
+              "index": 2,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_TRES",
+          "index": 0,
+          "domainKey": "valve1State",
+          "label": "Estado válvula A",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_TRES",
+          "index": 1,
+          "domainKey": "valve2State",
+          "label": "Estado válvula B",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_TRES",
+          "index": 2,
+          "domainKey": "valve3State",
+          "label": "Estado válvula C",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 0,
+          "domainKey": "outletFlow1",
+          "label": "Caudal válvula A",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 1,
+          "domainKey": "outletFlow2",
+          "label": "Caudal válvula B",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 2,
+          "domainKey": "outletFlow3",
+          "label": "Caudal válvula C",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 3,
+          "domainKey": "inletFlow1",
+          "label": "Caudal de entrada (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "plantId": "sim-buffers",
+      "displayName": "SIM · buffers distintos",
+      "displayNameProvisional": true,
+      "opcBuffers": {
+        "realIn": [
+          {
+            "browseName": "REAL_IN_SIM_BUF",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.REAL_IN_SIM_BUF"
+            },
+            "arrayLength": 10,
+            "dataType": "Float"
+          }
+        ],
+        "intIn": [
+          {
+            "browseName": "INT_IN_SIM_BUF",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_IN_SIM_BUF"
+            },
+            "arrayLength": 10,
+            "dataType": "Int16"
+          }
+        ],
+        "intOut": [
+          {
+            "browseName": "INT_OUT_SIM_BUF",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_OUT_SIM_BUF"
+            },
+            "arrayLength": 20,
+            "dataType": "Int16"
+          },
+          {
+            "browseName": "INT_OUT_SIM_BUF_B",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.INT_OUT_SIM_BUF_B"
+            },
+            "arrayLength": 20,
+            "dataType": "Int16"
+          }
+        ],
+        "bitIn": [
+          {
+            "browseName": "BIT_IN_SIM_BUF",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.BIT_IN_SIM_BUF"
+            },
+            "arrayLength": 16,
+            "dataType": "Boolean"
+          }
+        ],
+        "bitOut": [
+          {
+            "browseName": "BIT_OUT_SIM_BUF",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.BIT_OUT_SIM_BUF"
+            },
+            "arrayLength": 16,
+            "dataType": "Boolean"
+          }
+        ]
+      },
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "inferred"
+      },
+      "signals": [
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_BUF",
+          "index": 0,
+          "domainKey": "valve1",
+          "label": "Válvula absoluta 1/2 (como La Sirena)",
+          "flowDomainKey": "outletFlow1",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md. Modo ABSOLUTO: la palabra entera es de esta valvula (1 abre, 2 cierra, 0 suelta).",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_BUF",
+              "index": 0
+            },
+            "commands": {
+              "open": 1,
+              "close": 2
+            },
+            "mode": "absolute",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_BUF",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": 16385,
+                "close": 16384
+              },
+              "stateVerified": true
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_SIM_BUF_B",
+          "index": 1,
+          "domainKey": "valve2",
+          "label": "Válvula 4096/8192 en otro buffer (como La Vorágine)",
+          "flowDomainKey": "outletFlow2",
+          "_nota": "ANCLA, NO MANDO: esta valvula manda por INT_OUT_SIM_BUF_B[0] (write.target), compartida con las demas. La senal se ancla en otro indice porque validate-mapping rechaza dos senales en el mismo canal[indice]; la app no usa el valor de la senal de valvula para deducir el estado. Ademas validate-mapping agrupa por CANAL (intOut), no por buffer, asi que tampoco puede ir en intOut[0] aunque sea otro buffer.",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md. Se sostiene hasta que INT_IN_SIM_BUF[2] vale 1 (pulse.until), con tope de 45 s. El read-back espera 16385 para los DOS verbos, igual que La Voragine: es ambiguo y el simulador no lo emula (resultado sent).",
+            "target": {
+              "channel": "intOut",
+              "sourceBuffer": "INT_OUT_SIM_BUF_B",
+              "index": 0
+            },
+            "commands": {
+              "open": 4096,
+              "close": 8192
+            },
+            "mode": "bitmask",
+            "pulse": {
+              "holdMs": 45000,
+              "until": {
+                "channel": "intIn",
+                "sourceBuffer": "INT_IN_SIM_BUF",
+                "index": 2,
+                "equals": 1
+              }
+            },
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_SIM_BUF",
+              "index": 1,
+              "confirmsWrittenValue": false,
+              "expectedValue": 16385,
+              "stateVerified": false
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "bitOut",
+          "sourceBuffer": "BIT_OUT_SIM_BUF",
+          "index": 0,
+          "domainKey": "valve3",
+          "label": "Válvula de dos bobinas en bitOut",
+          "flowDomainKey": "outletFlow3",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": true,
+          "write": {
+            "_riesgo": "MAPPING DE PRUEBA del simulador (generatedFrom.simulationOnly). Estos bits NO estan asignados en ningun PLC: el backend se niega a arrancar con este archivo si CONNECTIVITY_PROVIDER=opcua. Ver docs/PRUEBAS_LOCALES_VALVULAS.md. Dos bobinas: BIT_OUT[0] abre, BIT_OUT[1] cierra. Orden compuesta: primero se suelta la contraria y despues se energiza la propia.",
+            "target": {
+              "channel": "bitOut",
+              "sourceBuffer": "BIT_OUT_SIM_BUF",
+              "index": 0
+            },
+            "commands": {
+              "open": true,
+              "close": false
+            },
+            "sequences": {
+              "open": [
+                {
+                  "index": 1,
+                  "value": false
+                },
+                {
+                  "index": 0,
+                  "value": true
+                }
+              ],
+              "close": [
+                {
+                  "index": 0,
+                  "value": false
+                },
+                {
+                  "index": 1,
+                  "value": true
+                }
+              ]
+            },
+            "mode": "absolute",
+            "pulse": {
+              "holdMs": 45000
+            },
+            "readBack": {
+              "channel": "bitIn",
+              "sourceBuffer": "BIT_IN_SIM_BUF",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "expectedByCommand": {
+                "open": true,
+                "close": false
+              },
+              "stateVerified": false
+            },
+            "timeoutMs": 5000,
+            "rollbackValue": false,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intIn",
+          "sourceBuffer": "INT_IN_SIM_BUF",
+          "index": 0,
+          "domainKey": "valve1State",
+          "label": "Estado válvula absoluta",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 0,
+          "domainKey": "outletFlow1",
+          "label": "Caudal válvula absoluta",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 1,
+          "domainKey": "outletFlow2",
+          "label": "Caudal válvula 4096/8192",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 2,
+          "domainKey": "outletFlow3",
+          "label": "Caudal válvula de dos bobinas",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 3,
+          "domainKey": "inletFlow1",
+          "label": "Caudal de entrada (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        }
+      ]
+    }
+  ]
+}

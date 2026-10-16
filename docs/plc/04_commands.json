@@ -2362,15 +2362,24 @@
       "escribiblePorServidor": true,
       "escribiblePorUsuarioActual": true,
       "valorActual": 0,
-      "equipoAsociado": "DESCONOCIDO",
-      "feedbackNodeId": "DESCONOCIDO — debe determinarse en la validación (qué índice de entrada confirma el efecto)",
-      "interlocks": "DESCONOCIDOS — deben leerse del programa del PLC local",
-      "permisoRequerido": "control_valves (a confirmar según el equipo real)",
+      "equipoAsociado": "VÁLVULA de Carbonero (valve1 en apps/api/config/opc_mapping.json): mando de apertura y cierre",
+      "codificacion": {
+        "fuente": "Integrador del PLC, 2026-10-05, con captura de RSLogix. Confirmado documentalmente; NO probado todavía en campo.",
+        "bit0": { "valor": 1, "accion": "APERTURA" },
+        "bit1": { "valor": 2, "accion": "CIERRE" },
+        "bit0YBit1A1": "ESTADO DE ERROR (abrir y cerrar a la vez). Prohibido: el WriteService apaga el bit contrario en la misma escritura.",
+        "bits2a15": "SIN INFORMAR. No se escriben; el backend los conserva (mode bitmask, read-modify-write).",
+        "comunicacionMaestroLocal": "Establecida entre el PLC maestro y el PLC local de Carbonero (integrador, 2026-10-05)."
+      },
+      "feedbackNodeId": "DESCONOCIDO — el integrador no informó si hay bit de estado o realimentación en INT_IN_CARBONERO. El mapping lee INT_IN_CARBONERO[0] sin semántica verificada (stateVerified: false); último valor conocido: 1024 = bit10 (trama del 2026-08-03).",
+      "interlocks": "Bits 0 y 1 nunca a 1 a la vez (estado de error, integrador 2026-10-05). El resto DESCONOCIDO — debe leerse del programa del PLC local.",
+      "permisoRequerido": "control_valves",
       "auditRequired": true,
       "writeAttemptedByTool": false,
-      "confianza": "nula",
-      "estado": "REQUIERE VALIDACIÓN EN PLANTA",
-      "procedimientoValidacion": "COMANDO CANDIDATO — NO ESCRIBIR HASTA VALIDAR. 1) En UAExpert, suscribir el NodeId ns=9;g=BFC8CF7B-FC4C-21FB-16A4-8EF12A2D9F4B (array completo) y observar INT_OUT_CARBONERO[0]. 2) Solicitar al operador de planta que accione LOCALMENTE el equipo del sitio CARBONERO (p. ej. abrir una electroválvula desde el tablero) y registrar qué índice del buffer de entrada cambia. 3) Confirmar con el integrador, sobre el programa del PLC (export L5X), qué equipo escribe la lógica en INT_OUT_CARBONERO[0] y con qué codificación (bit, valor, pulso). 4) Solo después de (3), y en ventana de mantenimiento con el equipo en local/aislado, validar la escritura."
+      "confianza": "alta",
+      "alcanceDeLaConfianza": "Solo la codificación de los bits 0 y 1, por documento del integrador. SIN CONFIRMAR: si el PLC local enclava con un pulso o hay que sostener el bit, el tiempo de recorrido y la realimentación. Los bits 2 a 15 de este índice y los índices 1 a 19 de INT_OUT_CARBONERO siguen sin validar.",
+      "estado": "CODIFICACIÓN CONFIRMADA POR EL INTEGRADOR — PENDIENTE DE PRUEBA DE CAMPO",
+      "procedimientoValidacion": "Bits 0 y 1: codificación entregada por el integrador; falta la prueba de campo. La app no tiene un bloqueo propio de Carbonero: hoy no ofrece mando porque no conoce el estado (sin palabra de estado ni caudal usable), y lo ofrecería si el caudal de entrada volviera a ser usable. 1) Ventana acordada y testigo humano mirando la válvula: Carbonero no reporta caudal ni estado. 2) Comprobar antes el liveness del sitio. 3) Leer INT_OUT_CARBONERO[0] e INT_IN_CARBONERO completos (solo lectura) y anotar el valor previo. 4) Abrir = bit0 (valor 1) y, en otra maniobra, cerrar = bit1 (valor 2); nunca los dos a la vez. 5) Registrar si la válvula se movió, cuánto tardó en llegar al tope y qué índice de INT_IN cambió. 6) Confirmar con el integrador si el PLC local enclava con un pulso o hay que sostener el bit, y cuánto dura el recorrido: de ahí sale pulse.holdMs (hoy provisional: 45 s sostenidos, como La Sirena). Bits 2 a 15: NO ESCRIBIR."
     },
     {
       "id": "INT_OUT_CARBONERO[1]",

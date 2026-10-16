@@ -2,8 +2,9 @@ import { Logger, Module } from '@nestjs/common';
 import { ConnectivityGateway } from './connectivity.gateway';
 import { CONNECTIVITY_ADAPTER, CONNECTIVITY_CONFIG } from './connectivity.tokens';
 import { loadConnectivityConfig, type ConnectivityConfig } from './connectivity.config';
-import { loadMapping } from './mapping/opc-mapping.loader';
+import { loadMapping, resolverRutaDelMapping } from './mapping/opc-mapping.loader';
 import { SimulatorBridgeAdapter } from './adapters/simulator/simulator-bridge.adapter';
+import { asegurarMappingParaPlcReal, opcionesDelEntorno } from './adapters/simulator/sim-scenario';
 import { OpcUaConnectivityAdapter } from './adapters/opcua/opcua-connectivity.adapter';
 import { BridgeOrchestratorService } from './bridge-orchestrator.service';
 import { PlantCache } from './pipeline/plant-cache';
@@ -34,9 +35,20 @@ import type { ConnectivityAdapter } from './ports/connectivity-adapter.port';
         logger.log(
           `Puente OPC UA: provider=${config.provider}, ${mapping.plants.length} plantas, ${mapping.targets.length} buffers de datos`,
         );
-        return config.provider === 'opcua'
-          ? new OpcUaConnectivityAdapter(config.opcua, mapping)
-          : new SimulatorBridgeAdapter(config.opcua, mapping);
+        if (config.provider === 'opcua') {
+          // Un mapping de PRUEBA del simulador (generatedFrom.simulationOnly) jamás llega al PLC real:
+          // sus bits son ensayos, y escribirlos movería equipo que nadie asignó. El backend no arranca.
+          asegurarMappingParaPlcReal(mapping);
+          return new OpcUaConnectivityAdapter(config.opcua, mapping);
+        }
+        // Simulador: el escenario de SIM_SCENARIO (o los supuestos por defecto). Uno incoherente con el
+        // mapping cargado hace fallar el arranque aquí, con el motivo, en vez de simular otra cosa.
+        const opciones = opcionesDelEntorno(mapping, resolverRutaDelMapping());
+        logger.log(
+          `Simulador: escenario "${opciones.name}"${opciones.source ? ` (${opciones.source})` : ''}, ` +
+            `MSG ${opciones.defaults.msgCycleMs} ms, latencia I/O ${opciones.ioLatencyMs} ms`,
+        );
+        return new SimulatorBridgeAdapter(config.opcua, mapping, opciones);
       },
     },
     BridgeOrchestratorService,

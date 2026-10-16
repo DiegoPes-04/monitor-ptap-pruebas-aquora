@@ -1,0 +1,25 @@
+{
+  "name": "produccion",
+  "description": "El mapping REAL (config/opc_mapping.json) contra el simulador, con los supuestos de campo: MSG de 8 s y recorrido de 30 s en hold. Para ver en local lo que hoy haría cada planta: las de pulso de 300 ms casi nunca llegan al PLC local, Carbonero sale en ámbar (sent) porque nadie ha declarado su realimentación, y La Vorágine se sostiene hasta que INT_IN[1] vale 1.",
+  "mapping": "../../config/opc_mapping.json",
+  "ioLatencyMs": 50,
+  "defaults": {
+    "travelMs": 30000,
+    "latchMode": "hold",
+    "initialState": "closed",
+    "feedback": "auto",
+    "flowOpen": 5,
+    "msgCycleMs": 8000,
+    "msgPhaseMs": 0
+  },
+  "valves": {
+    "carbonero/valve1": {
+      "_nota": "El integrador no informó de ninguna realimentación (2026-10-05): se simula un PLC que no informa de nada. Ni read-back ni caudal.",
+      "feedback": "none"
+    },
+    "voragine/valve1": {
+      "_nota": "INT_IN[1] valía 1025 en reposo (2026-08-15); el sostenido se suelta cuando vale 1.",
+      "untilIdleValue": 1025
+    }
+  }
+}

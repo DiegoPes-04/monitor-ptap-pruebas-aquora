@@ -5,6 +5,7 @@ import { AuditMiddleware } from '../infrastructure/audit/audit.middleware';
 import { LoggingModule } from '../infrastructure/logging/logging.module';
 import { MetricsModule } from '../infrastructure/metrics/metrics.module';
 import { OpcObservabilityModule } from '../infrastructure/connectivity/opc-observability.module';
+import { SimulatorToolsModule } from '../infrastructure/connectivity/adapters/simulator/simulator-tools.module';
 import { AuthModule } from './auth/auth.module';
 import { CommandsModule } from './commands/commands.module';
 import { HealthModule } from './health/health.module';
@@ -32,6 +33,8 @@ import { UsersModule } from './users/users.module';
     AppReleaseModule,
     // Edición del mapeo desde la app: escribe en MySQL y empuja al pipeline en caliente.
     MappingModule,
+    // Diagnóstico del simulador de válvulas (/api/opc/sim). Con el PLC real no se monta.
+    ...SimulatorToolsModule.siElSimuladorEstaActivo(),
   ],
 })
 export class AppModule implements NestModule {

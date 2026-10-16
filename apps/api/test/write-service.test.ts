@@ -12,9 +12,10 @@
 import 'reflect-metadata';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import type { AuditEntry, AuditLogService } from '../src/infrastructure/audit/audit-log.service';
 import type { ConnectivityConfig, OpcUaConfig } from '../src/infrastructure/connectivity/connectivity.config';
-import type { LoadedMapping, WriteSpec } from '../src/infrastructure/connectivity/mapping/opc-mapping.loader';
+import { loadMapping, type LoadedMapping, type WriteSpec } from '../src/infrastructure/connectivity/mapping/opc-mapping.loader';
 import type { PlantCache } from '../src/infrastructure/connectivity/pipeline/plant-cache';
 import type { LivenessState, PlantSnapshotDto } from '../src/infrastructure/connectivity/pipeline/plant-snapshot.dto';
 import type { BridgeStatus, ConnectivityAdapter } from '../src/infrastructure/connectivity/ports/connectivity-adapter.port';
@@ -313,6 +314,88 @@ test('write-service: un PULSO no se escribe dos veces cuando el estado NO confir
   const { service, adapter } = build({ secure: true, bridge: 'Connected', write: spec, confirms: false });
   await service.execute('voragine', { command: 'openValve', target: 'valveEV01' }, OPERADOR);
   assert.equal(adapter.writes.length, 2, 'activación + cierre; el rollback NO debe añadir un 3er write espurio');
+});
+
+// ── EXCLUSIÓN ABRIR/CERRAR EN MÁSCARA (Carbonero, integrador 2026-10-05) ────────────────────
+//
+// Abrir = bit0 (1) y cerrar = bit1 (2) de la MISMA palabra, y los dos a 1 a la vez es el estado que
+// el PLC declara ERROR. `bitmask` hacía `actual | valor`: con el bit contrario todavía puesto (un
+// cierre de pulso que falló, una escritura ajena) escribía 3. `preset` es lo que ya trae la palabra.
+
+const WRITE_EXCLUSION: WriteSpec = {
+  ...WRITE,
+  target: { channel: 'intOut', sourceBuffer: 'INT_OUT_TEST', index: 0 },
+  mode: 'bitmask',
+  commands: { open: 1, close: 2 },
+  pulse: { holdMs: 5 },
+  readBack: { channel: 'intIn', sourceBuffer: 'INT_IN_TEST', index: 0, confirmsWrittenValue: false, stateVerified: false },
+};
+
+/** ¿Alguna escritura dejó los dos sentidos puestos a la vez? */
+function dosSentidos(writes: Array<{ value: number | boolean }>, abrir: number, cerrar: number): boolean {
+  return writes.some((w) => (Number(w.value) & abrir) !== 0 && (Number(w.value) & cerrar) !== 0);
+}
+
+test('write-service: en máscara, ABRIR apaga el bit de CERRAR en la misma escritura', async () => {
+  const { service, adapter } = build({ secure: true, bridge: 'Connected', write: WRITE_EXCLUSION, preset: 2 });
+  await service.execute('carbonero', { command: 'open', target: 'valve1' }, OPERADOR);
+
+  assert.equal(adapter.writes[0].value, 1, 'con el bit de cerrar puesto, abrir escribe 1 y no 3');
+  assert.equal(dosSentidos(adapter.writes, 1, 2), false, 'jamás los bits 0 y 1 a la vez');
+});
+
+test('write-service: en máscara, CERRAR apaga el bit de ABRIR en la misma escritura', async () => {
+  const { service, adapter } = build({ secure: true, bridge: 'Connected', write: WRITE_EXCLUSION, preset: 1 });
+  await service.execute('carbonero', { command: 'close', target: 'valve1' }, OPERADOR);
+
+  assert.equal(adapter.writes[0].value, 2, 'con el bit de abrir puesto, cerrar escribe 2 y no 3');
+  assert.equal(dosSentidos(adapter.writes, 1, 2), false, 'jamás los bits 0 y 1 a la vez');
+});
+
+test('write-service: la exclusión solo apaga los bits de la válvula; el resto de la palabra se conserva', async () => {
+  // 1024 = bit10 hace aquí de bit AJENO en la palabra de mando: tiene que sobrevivir a la orden y al
+  // cierre del pulso, que es para lo que existe `bitmask`.
+  const { service, adapter } = build({ secure: true, bridge: 'Connected', write: WRITE_EXCLUSION, preset: 1024 | 2 });
+  await service.execute('carbonero', { command: 'open', target: 'valve1' }, OPERADOR);
+
+  assert.deepEqual(adapter.writes.map((w) => w.value), [1024 | 1, 1024], 'activa 1025 y suelta a 1024');
+});
+
+test('write-service: la exclusión sale del mapping, no de bits fijos (La Vorágine, 4096/8192)', async () => {
+  const spec: WriteSpec = { ...WRITE_EXCLUSION, commands: { open: 4096, close: 8192 } };
+  const { service, adapter } = build({ secure: true, bridge: 'Connected', write: spec, preset: 8192 });
+  await service.execute('voragine', { command: 'open', target: 'valve1' }, OPERADOR);
+
+  assert.equal(adapter.writes[0].value, 4096, 'con el bit13 puesto, abrir escribe 4096 y no 12288');
+  assert.equal(dosSentidos(adapter.writes, 4096, 8192), false);
+});
+
+test('write-service: el mando REAL de Carbonero nunca deja los bits 0 y 1 a la vez, y sale en ámbar', async () => {
+  const real = loadMapping(join(__dirname, '..', 'config', 'opc_mapping.json')).signals.find(
+    (s) => s.plantId === 'carbonero' && s.domainKey === 'valve1',
+  )?.write;
+  assert.ok(real, 'carbonero/valve1 debe tener write spec');
+  // Lo que se prueba es la aritmética de la palabra con el spec de PRODUCCIÓN. El sostenido real
+  // (45 s) se acorta para que el test no tarde minutos; su valor lo fija command-mapping.test.ts.
+  const spec: WriteSpec = { ...real, pulse: { holdMs: 5 }, timeoutMs: 60 };
+  const casos: Array<[string, number, number]> = [
+    ['open', 0, 1],
+    ['close', 0, 2],
+    ['open', 2, 1], // el bit de cerrar se había quedado puesto
+    ['close', 1, 2], // el de abrir
+    ['open', 3, 1], // la palabra ya llegaba en ERROR: la orden la saca de ahí, no la perpetúa
+    ['close', 3, 2],
+  ];
+  for (const [command, preset, activa] of casos) {
+    const { service, adapter } = build({ secure: true, bridge: 'Connected', write: spec, preset });
+    const r = await service.execute('carbonero', { command, target: 'valve1' }, OPERADOR);
+    const ultima = adapter.writes[adapter.writes.length - 1];
+
+    assert.equal(adapter.writes[0].value, activa, `${command} sobre ${preset}: activa ${activa}`);
+    assert.equal(dosSentidos(adapter.writes, 1, 2), false, `${command} sobre ${preset}: jamás 3`);
+    assert.equal(Number(ultima.value) & 3, 0, `${command} sobre ${preset}: el sostenido se suelta`);
+    assert.equal(r.status, 'sent', `${command} sobre ${preset}: estado sin verificar → ámbar, ni verde ni rojo`);
+  }
 });
 
 test('write-service: camino feliz → confirmado con trazabilidad', async () => {

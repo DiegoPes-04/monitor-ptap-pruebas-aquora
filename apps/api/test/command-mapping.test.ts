@@ -211,7 +211,8 @@ interface ProdWrite {
   _riesgo?: string;
   mode?: string;
   pulse?: { holdMs?: number; until?: { channel?: string; sourceBuffer?: string; index?: number; equals?: number } };
-  readBack?: { channel?: string; confirmsWrittenValue?: boolean };
+  readBack?: { channel?: string; confirmsWrittenValue?: boolean; expectedValue?: number; stateVerified?: boolean };
+  rollbackValue?: number;
 }
 
 function valvulasDeProduccion(): Array<{ plantId: string; w: ProdWrite | undefined }> {
@@ -224,14 +225,15 @@ function valvulasDeProduccion(): Array<{ plantId: string; w: ProdWrite | undefin
 test('mapping de PRODUCCIÓN: cada válvula escribe en el canal 0 con pulso y máscara de bits', () => {
   // Protege la forma verificada en campo: si alguien cambia el índice, el modo o quita el pulso,
   // el comando podría pisar bits ajenos o quedar ENCLAVADO (ver docs/archivo/PRUEBA_VALVULA_SIRENA.md).
-  // La Sirena está fuera a propósito: ver el test siguiente.
+  // La Sirena está fuera a propósito: ver el test siguiente. Carbonero comparte la forma (canal 0,
+  // máscara, pulso) pero NO el 4096: su codificación la dio el integrador (ver su test).
   const valves = valvulasDeProduccion();
   assert.ok(valves.length > 0);
   for (const { plantId, w } of valves) {
     assert.equal(w?.target?.index, 0, `${plantId}: se escribe por el canal 0`);
     if (plantId === 'sirena') continue;
 
-    assert.equal(w?.commands?.open, 4096, `${plantId}: abrir = 4096 (bit12)`);
+    if (plantId !== 'carbonero') assert.equal(w?.commands?.open, 4096, `${plantId}: abrir = 4096 (bit12)`);
     assert.equal(w?.mode, 'bitmask', `${plantId}: modo bitmask (no pisar bits ajenos de la palabra)`);
     assert.ok((w?.pulse?.holdMs ?? 0) > 0, `${plantId}: debe declarar pulso (si no, el bit queda enclavado al confirmar)`);
     assert.equal(w?.readBack?.channel, 'intIn', `${plantId}: el read-back va por el canal de ESTADO`);
@@ -240,16 +242,17 @@ test('mapping de PRODUCCIÓN: cada válvula escribe en el canal 0 con pulso y m�
   }
 });
 
-test('mapping de PRODUCCIÓN: CERRAR solo existe donde se verificó en campo', () => {
+test('mapping de PRODUCCIÓN: CERRAR solo existe donde hay respaldo (campo o integrador)', () => {
   // El verbo `close` es el que de verdad puede hacer daño: abrir de más desperdicia agua, cerrar de
   // más deja a un pueblo sin ella. Por eso no se replica "porque el patrón parece el mismo" — en
-  // Vorágine lo probó el cliente sobre la planta (2026-08-15) y en el resto no hay nada que lo
-  // respalde. Sin `close` en el mapping, la app responde UNKNOWN_COMMAND: no acciona a ciegas.
+  // Vorágine y Sirena lo probó el cliente sobre la planta (2026-08-15); en Carbonero lo entregó el
+  // integrador del PLC con captura de RSLogix (2026-10-05); en el resto no hay nada que lo respalde.
+  // Sin `close` en el mapping, la app responde UNKNOWN_COMMAND: no acciona a ciegas.
   const conCierre = valvulasDeProduccion()
     .filter((v) => v.w?.commands && 'close' in v.w.commands)
     .map((v) => `${v.plantId}=${v.w?.commands?.close}`)
     .sort();
-  assert.deepEqual(conCierre, ['sirena=2', 'voragine=8192']);
+  assert.deepEqual(conCierre, ['carbonero=2', 'sirena=2', 'voragine=8192']);
 
   const voragine = valvulasDeProduccion().find((v) => v.plantId === 'voragine')?.w;
   // 4096 = bit12 y 8192 = bit13: dos bits distintos de la MISMA palabra, cada uno como pulso. Que
@@ -306,6 +309,37 @@ test('mapping de PRODUCCIÓN: La Sirena — 1 abre, 2 cierra, 0 limpia (entrega 
   // Si alguien lo cambiara, la válvula se quedaría con el 1 o el 2 puesto para siempre.
   assert.equal(sirena?.rollbackValue, 0, 'tras 1 o 2 SIEMPRE se vuelve a escribir 0');
   assert.ok(typeof sirena?._riesgo === 'string' && sirena._riesgo.length > 200);
+});
+
+test('mapping de PRODUCCIÓN: Carbonero — bit0 abre, bit1 cierra, en la MISMA palabra (integrador 2026-10-05)', () => {
+  // Entregado por el integrador del PLC con captura de RSLogix, NO probado aún en campo. Sustituye al
+  // `open: 4096` heredado de Vorágine, que nunca se validó aquí. Mismos valores que Sirena (1 y 2),
+  // pero distinto modo: aquí son BITS de una palabra que puede llevar otros, así que `bitmask`.
+  const carbonero = valvulasDeProduccion().find((v) => v.plantId === 'carbonero')?.w;
+
+  assert.deepEqual(carbonero?.commands, { open: 1, close: 2 });
+  assert.equal(carbonero?.target?.index, 0);
+  assert.equal(carbonero?.mode, 'bitmask', 'bit0 y bit1 de una palabra compartida: absoluto pisaría los demás bits');
+  assert.equal(carbonero?.sequences, undefined);
+  assert.equal(carbonero?.latched, undefined, 'se suelta siempre; nunca se queda puesta');
+
+  // Temporización PROVISIONAL, pendiente del integrador (pulso o sostenido, recorrido): sostenido por
+  // reloj como Sirena. Con la MSG ciclando cada ~8 s, un pulso corto puede no llegar al PLC local.
+  assert.equal(carbonero?.pulse?.holdMs, 45_000);
+  assert.equal(carbonero?.pulse?.until, undefined, 'no se conoce ninguna realimentación');
+  assert.equal(carbonero?.rollbackValue, 0);
+
+  // El estado NO está verificado y su valor esperado no se inventa: el 16385 era de la convención de
+  // Vorágine, nunca se observó en Carbonero, y con `close` habría confirmado un cierre sobre una
+  // palabra que en esa convención significa ABIERTA.
+  assert.equal(carbonero?.readBack?.channel, 'intIn');
+  assert.equal(carbonero?.readBack?.stateVerified, false, 'el resultado tiene que salir en ámbar, no en verde');
+  assert.equal(carbonero?.readBack?.expectedValue, undefined);
+
+  assert.ok(
+    typeof carbonero?._riesgo === 'string' && /integrador/i.test(carbonero._riesgo) && carbonero._riesgo.includes('2026-10-05'),
+    'un comando de cierre debe llevar al lado de dónde sale y cuándo',
+  );
 });
 
 // Las reglas ELÉCTRICAS de una orden compuesta se comprueban al CARGAR, no al accionar: una

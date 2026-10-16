@@ -17,17 +17,27 @@ import type {
   ServerInfo,
   WriteSecurity,
 } from '../../ports/connectivity-adapter.port';
+import type { SimLatchMode, SimulatorOptions } from './sim-scenario';
+import { SimulatedPlc, type SimulationReport, type SimValveView, type SimViolation, type SimWrite } from './simulated-plc';
 
 type Outcome = 'success' | 'fail';
 
 /**
  * Adaptador de puente SIMULADO. Implementa ConnectivityAdapter emitiendo frames
- * crudos falsos con la MISMA topología del mapping. Puede emular TODOS los estados
+ * crudos con la MISMA topología del mapping. Puede emular TODOS los estados
  * del bridge (Connected/Stale/Recovering/Faulted) para probar el pipeline sin PLC
  * (regla 5), incluidos el reciclaje automático del watchdog y el heartbeat.
  *
+ * Los valores salen de un PLC simulado (`SimulatedPlc`): los buffers de SALIDA llevan lo que se
+ * escribió (nunca ruido) y, con un escenario (`options`), las válvulas del mapping se mueven y
+ * escriben su realimentación en los buffers de ENTRADA, de modo que la app ve el estado cambiar por
+ * el flujo normal de frames. Ver docs/PRUEBAS_LOCALES_VALVULAS.md.
+ *
+ * Sin `options` (los tests anteriores a este modelo) se comporta como antes: sin válvulas, sin ciclo
+ * MSG, sin latencia y sin validar el destino de las escrituras.
+ *
  * Métodos de emulación para tests (no pertenecen al puerto): freeze(), faultBuffer(),
- * setRecycleOutcome(), setHeartbeatOutcome().
+ * setRecycleOutcome(), setHeartbeatOutcome(), y los de diagnóstico del modelo (getSimulationReport…).
  */
 export class SimulatorBridgeAdapter implements ConnectivityAdapter {
   readonly provider = 'simulator' as const;
@@ -54,14 +64,19 @@ export class SimulatorBridgeAdapter implements ConnectivityAdapter {
   private recycleOutcome: Outcome = 'success';
   private heartbeatOutcome: Outcome = 'success';
 
-  // Fase 5: store de escrituras en RAM (emula los buffers OUT del maestro) + seam de test.
-  private readonly writeStore = new Map<string, number | boolean>();
+  // Fase 5: memoria del maestro (buffers OUT/IN) y, con escenario, las válvulas simuladas.
+  private readonly plc: SimulatedPlc;
+  /** Con escenario: destino validado como el adaptador real, latencia de I/O y válvulas. */
+  private readonly modelo: boolean;
   private writeConfirms = true;
 
   constructor(
     private readonly config: OpcUaConfig,
     private readonly mapping: LoadedMapping,
+    private readonly options?: SimulatorOptions,
   ) {
+    this.modelo = options !== undefined;
+    this.plc = new SimulatedPlc(mapping, options ?? null, Date.now());
     this.targets = mapping.targets;
     this.watchdog = new Watchdog(config.watchdogTimeoutMs, () => this.onWatchdogTimeout());
     this.coalescer = new FrameCoalescer(config.coalesceWindowMs, (f) => this.emitFrame(f));
@@ -149,22 +164,95 @@ export class SimulatorBridgeAdapter implements ConnectivityAdapter {
   }
 
   async writeBufferElement(target: BufferElementTarget, value: number | boolean): Promise<void> {
-    this.writeStore.set(this.elementKey(target), value);
+    const buffer = this.validarDestino(target);
+    if (buffer && buffer.arrayLength !== null && target.index >= buffer.arrayLength) {
+      // Lo que devuelve un servidor OPC UA ante un IndexRange fuera del array.
+      throw new Error(`write OPC UA rechazado (BadIndexRangeNoData) en ${target.sourceBuffer}[${target.index}]`);
+    }
+    // La escritura viaja, surte efecto en el servidor a mitad del camino y la respuesta vuelve.
+    await this.latencia('ida');
+    this.plc.escribir(target, value, Date.now());
+    await this.latencia('vuelta');
   }
 
   async readBufferElement(target: BufferElementTarget): Promise<BufferElementRead> {
-    const stored = this.writeStore.get(this.elementKey(target));
-    let value: number | boolean | null;
-    if (stored === undefined) {
-      value = 0; // elemento nunca escrito: default determinista (≠ 1, útil para probar 'fallido')
-    } else {
-      value = this.writeConfirms ? stored : typeof stored === 'boolean' ? !stored : Number(stored) + 1;
+    const buffer = this.validarDestino(target);
+    await this.latencia('ida');
+    const ahora = Date.now();
+    if (buffer && buffer.arrayLength !== null && target.index >= buffer.arrayLength) {
+      // Igual que el adaptador real: el servidor responde Bad sin valor.
+      await this.latencia('vuelta');
+      return { value: null, quality: 'Bad', sourceTimestamp: new Date(ahora).toISOString() };
     }
-    return { value, quality: 'Good', sourceTimestamp: new Date().toISOString() };
+    const actual = this.plc.leer(target, ahora);
+    // Perilla de test heredada: un elemento ESCRITO devuelve otro valor, para provocar un 'fallido'.
+    const value =
+      this.writeConfirms || !this.plc.fueEscritoPorBackend(target)
+        ? actual
+        : typeof actual === 'boolean'
+          ? !actual
+          : Number(actual) + 1;
+    await this.latencia('vuelta');
+    return { value, quality: 'Good', sourceTimestamp: new Date(ahora).toISOString() };
   }
 
-  private elementKey(t: BufferElementTarget): string {
-    return `${t.plantId}/${t.channel}/${t.sourceBuffer}[${t.index}]`;
+  /**
+   * Con escenario, el destino se valida como lo hace el adaptador OPC UA real (`findResolvedElement`):
+   * sin sesión, buffer inexistente, canal que no casa o buffer faulted → error. Un mapping de prueba
+   * con un `sourceBuffer` mal escrito tiene que fallar AQUÍ igual que fallaría en el PLC, no "funcionar"
+   * en local. Sin escenario (tests anteriores), no se valida nada, como antes.
+   */
+  private validarDestino(target: BufferElementTarget): MonitorTarget | null {
+    if (!this.modelo) return null;
+    if (this.bridge.is('Disconnected', 'Faulted', 'Connecting')) throw new Error('sin sesión OPC UA activa');
+    const t = this.targets.find(
+      (x) => x.plantId === target.plantId && x.channel === target.channel && x.browseName === target.sourceBuffer,
+    );
+    if (!t) throw new Error(`buffer no encontrado para escribir/leer: ${target.plantId}/${target.channel}/${target.sourceBuffer}`);
+    if (this.faultedBuffers.has(`${t.plantId}/${t.browseName}`)) throw new Error(`buffer no resuelto (faulted): ${target.sourceBuffer}`);
+    return t;
+  }
+
+  /** Media ida y vuelta de una petición OPC UA (`ioLatencyMs`). Sin escenario, nada. */
+  private async latencia(tramo: 'ida' | 'vuelta'): Promise<void> {
+    const total = this.options?.ioLatencyMs ?? 0;
+    if (total <= 0) return;
+    const ida = Math.floor(total / 2);
+    const ms = tramo === 'ida' ? ida : total - ida;
+    if (ms > 0) await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  }
+
+  // ── Modelo de válvulas: diagnóstico y perillas (endpoints /api/opc/sim, tests) ──────
+
+  /** Escenario, plantas (ciclos MSG), válvulas con su estado y contadores. */
+  getSimulationReport(): SimulationReport {
+    return this.plc.informe(Date.now());
+  }
+
+  getSimulatedValve(plantId: string, valveKey: string): SimValveView | null {
+    return this.plc.valvula(plantId, valveKey, Date.now());
+  }
+
+  /** Historial de escrituras del backend sobre el maestro (lo que salió por el cable). */
+  getWriteHistory(): SimWrite[] {
+    return this.plc.escrituras();
+  }
+
+  /** Escrituras que dejaron ABRIR y CERRAR de una misma válvula a 1 a la vez. Debe estar vacío. */
+  getViolations(): SimViolation[] {
+    return this.plc.violacionesRegistradas();
+  }
+
+  forceValveError(plantId: string, valveKey: string, reason = 'forzado desde el diagnóstico del simulador'): SimValveView | null {
+    return this.plc.forzarError(plantId, valveKey, reason, Date.now());
+  }
+
+  resetValve(plantId: string, valveKey: string): SimValveView | null {
+    return this.plc.rearmar(plantId, valveKey, Date.now());
+  }
+
+  setValveLatchMode(plantId: string, valveKey: string, mode: SimLatchMode): SimValveView | null {
+    return this.plc.cambiarModo(plantId, valveKey, mode, Date.now());
   }
 
   // ── emisión interna ─────────────────────────────────────────────────────────────
@@ -209,21 +297,23 @@ export class SimulatorBridgeAdapter implements ConnectivityAdapter {
     }
   }
 
+  /**
+   * Muestra de un buffer. Las SALIDAS llevan lo escrito (o su valor inicial), nunca ruido: antes este
+   * método inventaba un seno para todos los buffers y lo escrito no aparecía jamás en un frame. Las
+   * entradas sin dueño siguen siendo sintéticas (mantienen la planta `live`); las que escribe una
+   * válvula simulada llevan su realimentación.
+   */
   private fakeBuffer(target: MonitorTarget): RawBufferSample {
-    const len = target.arrayLength ?? 4;
-    const t = Date.now() / 1000;
-    const values: Array<number | boolean> =
-      target.channel === 'bitIn' || target.channel === 'bitOut'
-        ? Array.from({ length: len }, (_, i) => Math.sin(t + i) > 0)
-        : Array.from({ length: len }, (_, i) => Number((50 + 40 * Math.sin(t / 5 + i)).toFixed(2)));
+    const ahora = Date.now();
+    const values = this.plc.valoresDelBuffer(target, ahora);
     return {
       browseName: target.browseName,
       channel: target.channel,
       values,
       quality: 'Good',
       statusCode: 'Good',
-      sourceTimestamp: new Date().toISOString(),
-      serverTimestamp: new Date().toISOString(),
+      sourceTimestamp: new Date(ahora).toISOString(),
+      serverTimestamp: new Date(ahora).toISOString(),
     };
   }
 
