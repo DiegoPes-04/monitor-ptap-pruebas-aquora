@@ -125,6 +125,8 @@ export interface Plan {
   parAntes: EstadoPar;
   parDespues: EstadoPar;
   otra: { valvula: Valvula; estado: EstadoPar };
+  /** Bits fuera de {2,3,12,13} que esta escritura APAGA (solo con `limpiarAjenos`); 0 si ninguno. */
+  ajenosApagados: number;
   avisos: string[];
 }
 
@@ -138,20 +140,33 @@ export interface Plan {
  *
  * Los avisos no detienen nada: dicen en qué estado estaba la palabra (un par en 0/0 o 1/1 es lo que
  * la regla prohíbe y la orden lo corrige; la OTRA válvula en 0/0 o 1/1 se avisa y no se toca).
+ *
+ * `limpiarAjenos` APAGA, en la misma escritura, los bits que no son de ninguna válvula. Existe por el
+ * bit1 (valor 2) que el 2026-10-16 apareció en INT_OUT_VORAGINE[0] antes de cualquier orden: alguien
+ * escribió un 2 suelto —probablemente leyendo «.2» como el valor 2 y no como el bit 2— y, como la
+ * escritura conserva los bits ajenos, cada orden lo arrastraba (4106 = 4096 + 8 + 2). Solo puede
+ * apagar: nunca enciende un bit fuera de la lista blanca, y la otra válvula sigue sin tocarse.
  */
-export function planificar(palabraLeida: number, valvula: Valvula, verbo: Verbo): Plan {
+export function planificar(
+  palabraLeida: number,
+  valvula: Valvula,
+  verbo: Verbo,
+  opciones: { limpiarAjenos?: boolean } = {},
+): Plan {
   const actual = aSinSigno16(palabraLeida);
   const p = VALVULAS[valvula];
   const bitVerbo = p[verbo];
   const bitContrario = p[contrario(verbo)];
-  const nuevo = ((actual & ~bitContrario) | bitVerbo) & 0xffff;
+  const limpiar = opciones.limpiarAjenos === true;
+  const ajenosApagados = limpiar ? actual & ~LISTA_BLANCA & 0xffff : 0;
+  const nuevo = ((actual & ~bitContrario) | bitVerbo) & (limpiar ? LISTA_BLANCA : 0xffff);
   const diff = nuevo ^ actual;
   const otra = otraValvula(valvula);
 
-  if ((diff & ~(p.abrir | p.cerrar)) !== 0) {
+  if ((diff & ~(p.abrir | p.cerrar) & ~ajenosApagados) !== 0) {
     throw new Error(`ABORTADO: la escritura cambiaría bits fuera del par de la ${valvula} (${textoBits(diff)}). No se escribe nada.`);
   }
-  if ((diff & ~LISTA_BLANCA) !== 0) {
+  if ((diff & ~LISTA_BLANCA & ~ajenosApagados) !== 0 || (nuevo & ~LISTA_BLANCA & ~actual) !== 0) {
     throw new Error(`ABORTADO: la escritura cambiaría bits fuera de la lista blanca {2,3,12,13} (${textoBits(diff)}). No se escribe nada.`);
   }
   if (estadoDelPar(nuevo, valvula) !== verbo) {
@@ -177,7 +192,11 @@ export function planificar(palabraLeida: number, valvula: Valvula, verbo: Verbo)
     avisos.push(`la ${otra} está en 0/0 (sin señal). Esta herramienta NO la toca: fíjala con su propia orden.`);
   }
   const ajenos = actual & ~LISTA_BLANCA;
-  if (ajenos !== 0) avisos.push(`hay bits fuera de {2,3,12,13} puestos (${textoBits(ajenos)}): se conservan tal cual.`);
+  if (ajenosApagados !== 0) {
+    avisos.push(`--sin-ajenos: se APAGAN los bits fuera de {2,3,12,13} (${textoBits(ajenosApagados)}) en esta misma escritura.`);
+  } else if (ajenos !== 0) {
+    avisos.push(`hay bits fuera de {2,3,12,13} puestos (${textoBits(ajenos)}): se conservan tal cual (para quitarlos, --sin-ajenos).`);
+  }
 
   return {
     valvula,
@@ -190,6 +209,7 @@ export function planificar(palabraLeida: number, valvula: Valvula, verbo: Verbo)
     parAntes,
     parDespues: estadoDelPar(nuevo, valvula),
     otra: { valvula: otra, estado: estadoOtra },
+    ajenosApagados,
     avisos,
   };
 }
@@ -204,6 +224,7 @@ export const USO = [
   '                                                                         SIMULACRO: qué escribiría (sale con 2)',
   '  npx tsx scripts/test-valvulas-voragine.ts <entrada|salida> <abrir|cerrar> --armar [--observar <seg>]',
   '                                                                         ESCRIBE (cuenta atrás de 5 s) y observa (60 s por defecto)',
+  '  ... <entrada|salida> <abrir|cerrar> --sin-ajenos [--armar]             además APAGA los bits que no son de ninguna válvula',
   '  Al final, opcional: opc.tcp://host:puerto  (si no, OPC_ENDPOINT del entorno o del .env)',
 ].join('\n');
 
@@ -211,6 +232,8 @@ export interface Opciones {
   valvula: Valvula | null;
   verbo: Verbo | null;
   armar: boolean;
+  /** Apagar en la misma escritura los bits fuera de {2,3,12,13}. Solo con una orden. */
+  sinAjenos: boolean;
   /** null = no se pidió (con orden se observan 60 s; sin orden, nada). */
   observarSeg: number | null;
   endpoint: string | null;
@@ -222,6 +245,7 @@ export const OBSERVAR_MAX_SEG = 3600;
 export function parsearArgumentos(argv: string[]): { ok: true; opciones: Opciones } | { ok: false; error: string } {
   const posicionales: string[] = [];
   let armar = false;
+  let sinAjenos = false;
   let observarSeg: number | null = null;
   let endpoint: string | null = null;
 
@@ -230,6 +254,9 @@ export function parsearArgumentos(argv: string[]): { ok: true; opciones: Opcione
     if (a === '--armar') {
       if (armar) return { ok: false, error: '--armar repetido' };
       armar = true;
+    } else if (a === '--sin-ajenos') {
+      if (sinAjenos) return { ok: false, error: '--sin-ajenos repetido' };
+      sinAjenos = true;
     } else if (a === '--observar') {
       if (observarSeg !== null) return { ok: false, error: '--observar repetido' };
       const v = argv[i + 1];
@@ -249,7 +276,8 @@ export function parsearArgumentos(argv: string[]): { ok: true; opciones: Opcione
 
   if (posicionales.length === 0) {
     if (armar) return { ok: false, error: '--armar sin válvula ni verbo: no hay nada que escribir' };
-    return { ok: true, opciones: { valvula: null, verbo: null, armar, observarSeg, endpoint } };
+    if (sinAjenos) return { ok: false, error: '--sin-ajenos va con una orden: <entrada|salida> <abrir|cerrar> --sin-ajenos' };
+    return { ok: true, opciones: { valvula: null, verbo: null, armar, sinAjenos, observarSeg, endpoint } };
   }
   if (posicionales.length !== 2) {
     return { ok: false, error: `se esperan exactamente dos palabras, <entrada|salida> <abrir|cerrar>, y hay ${posicionales.length}: ${posicionales.join(' ')}` };
@@ -257,7 +285,7 @@ export function parsearArgumentos(argv: string[]): { ok: true; opciones: Opcione
   const [valvula, verbo] = posicionales;
   if (valvula !== 'entrada' && valvula !== 'salida') return { ok: false, error: `válvula desconocida: "${valvula}" (entrada | salida)` };
   if (verbo !== 'abrir' && verbo !== 'cerrar') return { ok: false, error: `verbo desconocido: "${verbo}" (abrir | cerrar)` };
-  return { ok: true, opciones: { valvula, verbo, armar, observarSeg, endpoint } };
+  return { ok: true, opciones: { valvula, verbo, armar, sinAjenos, observarSeg, endpoint } };
 }
 
 /** Cuántos segundos observar: los pedidos; si no, 60 tras una orden y 0 en modo solo estado. */

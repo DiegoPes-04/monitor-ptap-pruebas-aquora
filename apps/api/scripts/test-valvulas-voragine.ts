@@ -285,12 +285,12 @@ export async function ejecutar(e: Entorno): Promise<number> {
       out(`ERROR: no se pudo leer ${BUFFER_MANDO}[${INDICE_MANDO}]. Sin la palabra actual no se calcula ninguna escritura.`);
       return CODIGO.ERROR;
     }
-    let plan = planificar(inicial.mando, o.valvula, o.verbo);
+    let plan = planificar(inicial.mando, o.valvula, o.verbo, { limpiarAjenos: o.sinAjenos });
     out('');
     for (const l of lineasDelPlan(plan)) out(l);
 
     if (!plan.cambia) {
-      out(`La ${o.valvula} YA tiene la señal de ${o.verbo} y nada más: no hay nada que escribir.`);
+      out(`La ${o.valvula} YA tiene la señal de ${o.verbo}${o.sinAjenos ? ' y no hay bits ajenos' : ''}: no hay nada que escribir.`);
       if (o.observarSeg) {
         abrirLog();
         await observar(o.observarSeg);
@@ -322,7 +322,7 @@ export async function ejecutar(e: Entorno): Promise<number> {
     }
     if (fresca.value !== inicial.mando) {
       out(`⚠ La palabra cambió durante la cuenta atrás (${inicial.mando} → ${fresca.value}): se recalcula sobre la nueva.`);
-      plan = planificar(fresca.value, o.valvula, o.verbo);
+      plan = planificar(fresca.value, o.valvula, o.verbo, { limpiarAjenos: o.sinAjenos });
       for (const l of lineasDelPlan(plan)) out(l);
       if (!plan.cambia) {
         out(`La ${o.valvula} ya tiene la señal de ${o.verbo}: no se escribe nada.`);

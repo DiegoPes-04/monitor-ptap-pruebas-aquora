@@ -150,6 +150,50 @@ test('plan: avisa si el par partía en 1/1 o 0/0, y si la OTRA está en 1/1 o 0/
   assert.ok(ajenos.avisos.some((a) => /fuera de \{2,3,12,13\}/.test(a)));
 });
 
+test('plan --sin-ajenos: el 2 suelto del 2026-10-16 se apaga en la MISMA escritura, sin tocar las válvulas', () => {
+  // Lo que había en campo: 4106 = {1,3,12} — entrada CERRAR, salida ABRIR y un bit1 (valor 2) que no es
+  // de ninguna válvula y que cada orden arrastraba.
+  const abrir = planificar(4106, 'entrada', 'abrir', { limpiarAjenos: true });
+  assert.equal(abrir.nuevo, 4100, 'entrada ABRIR + salida ABRIR, sin el 2');
+  assert.equal(abrir.ajenosApagados, 2);
+  assert.deepEqual(abrir.bitsQueCambian, [1, 2, 3]);
+  assert.equal(abrir.otra.estado, 'abrir', 'la salida no se toca');
+  assert.ok(abrir.avisos.some((a) => /se APAGAN/.test(a)));
+
+  const cerrar = planificar(abrir.nuevo, 'entrada', 'cerrar', { limpiarAjenos: true });
+  assert.equal(cerrar.nuevo, 4104, 'entrada CERRAR + salida ABRIR');
+  assert.deepEqual(cerrar.bitsQueCambian, [2, 3]);
+
+  // Ya con el verbo pero con el ajeno puesto: sí hay algo que escribir (quitar el 2).
+  const soloAjeno = planificar(4096 | 8 | 2, 'entrada', 'cerrar', { limpiarAjenos: true });
+  assert.equal(soloAjeno.cambia, true);
+  assert.equal(soloAjeno.nuevo, 4104);
+  assert.equal(planificar(4104, 'entrada', 'cerrar', { limpiarAjenos: true }).cambia, false, 'idempotente');
+
+  // Sin la opción, el comportamiento de siempre: se conserva.
+  assert.equal(planificar(4106, 'entrada', 'abrir').nuevo, 4102);
+
+  // Nunca toca la otra válvula aunque esté en 1/1 o 0/0, y nunca enciende un bit ajeno.
+  for (let palabra = 0; palabra <= 0xffff; palabra += 37) {
+    for (const valvula of ['entrada', 'salida'] as const) {
+      for (const verbo of ['abrir', 'cerrar'] as const) {
+        const p = planificar(palabra, valvula, verbo, { limpiarAjenos: true });
+        const otra = valvula === 'entrada' ? 4096 | 8192 : 4 | 8;
+        assert.equal(p.nuevo & otra, palabra & otra, `${palabra} ${valvula} ${verbo}: la otra válvula intacta`);
+        assert.equal(p.nuevo & ~(4 | 8 | 4096 | 8192), 0, `${palabra}: sin bits ajenos`);
+      }
+    }
+  }
+});
+
+test('argumentos: --sin-ajenos solo con una orden', () => {
+  const r = parsearArgumentos(['entrada', 'cerrar', '--sin-ajenos', '--armar']);
+  assert.ok(r.ok);
+  assert.equal(r.opciones.sinAjenos, true);
+  assert.equal(parsearArgumentos(['--sin-ajenos']).ok, false, 'sin orden no hay nada que limpiar');
+  assert.equal(parsearArgumentos(['entrada', 'cerrar', '--sin-ajenos', '--sin-ajenos']).ok, false);
+});
+
 test('plan: si la palabra ya tiene el verbo, no hay nada que escribir', () => {
   const p = planificar(4096 | 8, 'salida', 'abrir');
   assert.equal(p.cambia, false);
@@ -159,7 +203,7 @@ test('plan: si la palabra ya tiene el verbo, no hay nada que escribir', () => {
 test('argumentos: sin nada = solo estado; con orden = simulacro salvo --armar; 60 s de observación por defecto', () => {
   const r0 = parsearArgumentos([]);
   assert.ok(r0.ok);
-  assert.deepEqual(r0.opciones, { valvula: null, verbo: null, armar: false, observarSeg: null, endpoint: null });
+  assert.deepEqual(r0.opciones, { valvula: null, verbo: null, armar: false, sinAjenos: false, observarSeg: null, endpoint: null });
   assert.equal(segundosDeObservacion(r0.opciones), 0);
 
   const r1 = parsearArgumentos(['salida', 'cerrar']);
@@ -169,7 +213,7 @@ test('argumentos: sin nada = solo estado; con orden = simulacro salvo --armar; 6
 
   const r2 = parsearArgumentos(['entrada', 'abrir', '--armar', '--observar', '15', 'opc.tcp://10.0.0.1:4840']);
   assert.ok(r2.ok);
-  assert.deepEqual(r2.opciones, { valvula: 'entrada', verbo: 'abrir', armar: true, observarSeg: 15, endpoint: 'opc.tcp://10.0.0.1:4840' });
+  assert.deepEqual(r2.opciones, { valvula: 'entrada', verbo: 'abrir', armar: true, sinAjenos: false, observarSeg: 15, endpoint: 'opc.tcp://10.0.0.1:4840' });
 
   const r3 = parsearArgumentos(['--observar', '120']);
   assert.ok(r3.ok);
