@@ -396,25 +396,25 @@
           "sourceBuffer": "INT_OUT_SOLEDAD",
           "index": 0,
           "domainKey": "valve1",
-          "label": "Válvula 1",
+          "label": "Válvula de salida 1",
+          "flowDomainKey": "outletFlow1",
           "mappingStatus": "mapped",
           "confidence": "confirmed",
           "writable": true,
           "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. Valvula de SALIDA 1 de Soledad: abrir = bit0 (1), cerrar = bit1 (2), en INT_OUT_SOLEDAD[0]. REGLA DEL INTEGRADOR, textual: 'estas senales deben ser sostenidas, es decir que todo el tiempo debe quedar la senal de apertura o la senal de cierre, nunca las dos, siempre una de las dos'. Por eso sustained: una sola escritura (actual & ~contrario) | verbo, sin pulso, sin rollback y sin limpiar nunca. Sustituye al open:4096 con pulso de 300 ms HEREDADO de Voragine, que nunca se valido aqui. flowDomainKey outletFlow1 (realIn[9], 'Caudal de salida', el unico de salida de la planta): el estado sale del caudal, que es evidencia fisica. readBack sin expectedValue: el 16385 era la convencion de Voragine y aqui no tiene base; el resultado sera ambar (sent) cuando el eco confirme la escritura. NO probado todavia en campo: primera maniobra con el operador. Revertir: quitar este spec y dejar writable:false.",
             "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_SOLEDAD", "index": 0 },
-            "commands": { "open": 4096 },
+            "commands": { "open": 1, "close": 2 },
             "mode": "bitmask",
-            "pulse": { "holdMs": 300 },
+            "sustained": true,
             "readBack": {
               "channel": "intIn",
               "sourceBuffer": "INT_IN_SOLEDAD",
               "index": 0,
               "confirmsWrittenValue": false,
-              "expectedValue": 16385,
               "stateVerified": false
             },
             "timeoutMs": 5000,
-            "rollbackValue": 0,
             "permission": "control_valves"
           }
         },
@@ -1042,25 +1042,52 @@
           "sourceBuffer": "INT_OUT_CASCAJAL",
           "index": 0,
           "domainKey": "valve1",
-          "label": "Válvula 1",
+          "label": "Válvula de salida 1",
+          "flowDomainKey": "outletFlow1",
           "mappingStatus": "mapped",
           "confidence": "confirmed",
           "writable": true,
           "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. Valvula de SALIDA 1 de Cascajal: abrir = bit7 (128), cerrar = bit8 (256), en INT_OUT_CASCAJAL[0], la MISMA palabra que la salida 2 (valve2, bits 12/13). REGLA DEL INTEGRADOR, textual: 'estas senales deben ser sostenidas, es decir que todo el tiempo debe quedar la senal de apertura o la senal de cierre, nunca las dos, siempre una de las dos'. Por eso sustained: una sola escritura (actual & ~contrario) | verbo en el turno de la palabra, sin pulso, sin rollback y sin limpiar nunca; no toca los bits de la salida 2. Sustituye al open:4096 con pulso de 300 ms HEREDADO de Voragine, que nunca se valido aqui y que hoy es el bit de ABRIR LA SALIDA 2. flowDomainKey outletFlow1 (realIn[0], 'Caudal de salida 1'): SUPUESTO por el nombre, no confirmado en campo que ese caudal sea el de esta valvula. valve1State (INT_IN[1], 251 = cerrada, operador 2026-08-13) se conserva tal cual. readBack sin expectedValue (el 16385 era de Voragine). NO probado todavia en campo: primera maniobra con el operador. Revertir: quitar este spec y dejar writable:false.",
             "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_CASCAJAL", "index": 0 },
-            "commands": { "open": 4096 },
+            "commands": { "open": 128, "close": 256 },
             "mode": "bitmask",
-            "pulse": { "holdMs": 300 },
+            "sustained": true,
             "readBack": {
               "channel": "intIn",
               "sourceBuffer": "INT_IN_CASCAJAL",
               "index": 0,
               "confirmsWrittenValue": false,
-              "expectedValue": 16385,
               "stateVerified": false
             },
             "timeoutMs": 5000,
-            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_CASCAJAL",
+          "index": 1,
+          "domainKey": "valve2",
+          "label": "Válvula de salida 2",
+          "flowDomainKey": "outletFlow2",
+          "mappingStatus": "mapped",
+          "confidence": "confirmed",
+          "writable": true,
+          "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. Valvula de SALIDA 2 de Cascajal: abrir = bit12 (4096), cerrar = bit13 (8192), en INT_OUT_CASCAJAL[0], la MISMA palabra que la salida 1 (valve1, bits 7/8). Senal SOSTENIDA (regla del integrador, ver valve1): sustained, sin pulso, sin rollback, sin limpiar nunca. EL INDICE DE LA SENAL (intOut[1]) ES UN ANCLA, NO EL CANAL DE MANDO: validate-mapping no admite dos senales en el mismo intOut[0], asi que la senal cuelga de un elemento libre y manda por write.target INT_OUT_CASCAJAL[0], igual que la entrada de Voragine. flowDomainKey outletFlow2 (realIn[7], 'Caudal de salida 2'): SUPUESTO por el nombre. readBack sin semantica de estado conocida (stateVerified:false). NO probado todavia en campo: primera maniobra con el operador. Revertir: quitar esta senal.",
+            "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_CASCAJAL", "index": 0 },
+            "commands": { "open": 4096, "close": 8192 },
+            "mode": "bitmask",
+            "sustained": true,
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_CASCAJAL",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "stateVerified": false
+            },
+            "timeoutMs": 5000,
             "permission": "control_valves"
           }
         },
@@ -1680,25 +1707,52 @@
           "sourceBuffer": "INT_OUT_CAMPOALEGRE",
           "index": 0,
           "domainKey": "valve1",
-          "label": "Válvula 1",
+          "label": "Válvula de salida tanque nuevo",
+          "flowDomainKey": "outletFlow1",
           "mappingStatus": "mapped",
           "confidence": "confirmed",
           "writable": true,
           "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. Valvula de SALIDA TANQUE NUEVO de Campoalegre: abrir = bit7 (128), cerrar = bit8 (256), en INT_OUT_CAMPOALEGRE[0], la MISMA palabra que la salida 2 - Piamonte (valve2, bits 12/13). REGLA DEL INTEGRADOR, textual: 'estas senales deben ser sostenidas, es decir que todo el tiempo debe quedar la senal de apertura o la senal de cierre, nunca las dos, siempre una de las dos'. Por eso sustained: una sola escritura (actual & ~contrario) | verbo en el turno de la palabra, sin pulso, sin rollback y sin limpiar nunca; no toca los bits de Piamonte. Sustituye al open:4096 con pulso de 300 ms HEREDADO de Voragine, que nunca se valido aqui y que hoy es el bit de ABRIR PIAMONTE. flowDomainKey outletFlow1 (realIn[0], 'Caudal de salida 1'): SUPUESTO (tanque nuevo = salida 1, Piamonte = salida 2 por el nombre que dio el integrador), no confirmado en campo. readBack sin expectedValue (el 16385 era de Voragine). NO probado todavia en campo: primera maniobra con el operador. Revertir: quitar este spec y dejar writable:false.",
             "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_CAMPOALEGRE", "index": 0 },
-            "commands": { "open": 4096 },
+            "commands": { "open": 128, "close": 256 },
             "mode": "bitmask",
-            "pulse": { "holdMs": 300 },
+            "sustained": true,
             "readBack": {
               "channel": "intIn",
               "sourceBuffer": "INT_IN_CAMPOALEGRE",
               "index": 0,
               "confirmsWrittenValue": false,
-              "expectedValue": 16385,
               "stateVerified": false
             },
             "timeoutMs": 5000,
-            "rollbackValue": 0,
+            "permission": "control_valves"
+          }
+        },
+        {
+          "buffer": "intOut",
+          "sourceBuffer": "INT_OUT_CAMPOALEGRE",
+          "index": 1,
+          "domainKey": "valve2",
+          "label": "Válvula de salida 2 - Piamonte",
+          "flowDomainKey": "outletFlow2",
+          "mappingStatus": "mapped",
+          "confidence": "confirmed",
+          "writable": true,
+          "write": {
+            "_riesgo": "FUENTE: integrador del PLC, 2026-10-16. Valvula de SALIDA 2 - PIAMONTE de Campoalegre: abrir = bit12 (4096), cerrar = bit13 (8192), en INT_OUT_CAMPOALEGRE[0], la MISMA palabra que la salida tanque nuevo (valve1, bits 7/8). Senal SOSTENIDA (regla del integrador, ver valve1): sustained, sin pulso, sin rollback, sin limpiar nunca. EL INDICE DE LA SENAL (intOut[1]) ES UN ANCLA, NO EL CANAL DE MANDO: validate-mapping no admite dos senales en el mismo intOut[0], asi que la senal cuelga de un elemento libre y manda por write.target INT_OUT_CAMPOALEGRE[0], igual que la entrada de Voragine. flowDomainKey outletFlow2 (realIn[7], 'Caudal de salida 2'): SUPUESTO por el nombre. readBack sin semantica de estado conocida (stateVerified:false). NO probado todavia en campo: primera maniobra con el operador. Revertir: quitar esta senal.",
+            "target": { "channel": "intOut", "sourceBuffer": "INT_OUT_CAMPOALEGRE", "index": 0 },
+            "commands": { "open": 4096, "close": 8192 },
+            "mode": "bitmask",
+            "sustained": true,
+            "readBack": {
+              "channel": "intIn",
+              "sourceBuffer": "INT_IN_CAMPOALEGRE",
+              "index": 0,
+              "confirmsWrittenValue": false,
+              "stateVerified": false
+            },
+            "timeoutMs": 5000,
             "permission": "control_valves"
           }
         },

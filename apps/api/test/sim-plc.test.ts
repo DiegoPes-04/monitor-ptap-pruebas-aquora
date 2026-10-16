@@ -353,7 +353,8 @@ test('PLC: palabra de estado con convención LITERAL (stateEncoding de Cascajal,
   const plc = new SimulatedPlc(loadMapping(RUTA_PRODUCCION), opciones(), 0);
   const estado: SimElementRef = { plantId: 'cascajal', channel: 'intIn', sourceBuffer: 'INT_IN_CASCAJAL', index: 1 };
   assert.equal(plc.leer(estado, 0), 251, 'cerrada = 251 (verificado en campo 2026-08-13)');
-  plc.escribir({ plantId: 'cascajal', channel: 'intOut', sourceBuffer: 'INT_OUT_CASCAJAL', index: 0 }, 4096, 10);
+  // 128 = bit7 = abrir la salida 1 (integrador 2026-10-16). El 4096 de antes es ahora la salida 2.
+  plc.escribir({ plantId: 'cascajal', channel: 'intOut', sourceBuffer: 'INT_OUT_CASCAJAL', index: 0 }, 128, 10);
   assert.equal(plc.leer(estado, 2000), 0, 'abierta: el mapping no declara literal de abierta → neutro, la app cae al caudal');
 });
 
