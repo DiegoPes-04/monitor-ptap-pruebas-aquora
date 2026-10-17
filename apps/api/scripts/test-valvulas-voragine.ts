@@ -75,6 +75,7 @@ import {
   nombreDelLog,
   parsearArgumentos,
   planificar,
+  planificarPalabra,
   segundosDeObservacion,
   textoBits,
   verificarContraMapping,
@@ -270,6 +271,57 @@ export async function ejecutar(e: Entorno): Promise<number> {
     out('ESTADO ACTUAL');
     out(lineaDeMuestra(hora(e.ahora()), inicial, null));
     if (inicial.mando !== null) out(`  ${BUFFER_MANDO}[${INDICE_MANDO}] = ${describirPalabra(inicial.mando)}`);
+
+    // 3-bis) Modo `palabra <valor>`: la palabra ENTERA con un valor exacto (ver planificarPalabra).
+    if (o.palabra !== null) {
+      if (inicial.mando === null) {
+        out(`ERROR: no se pudo leer ${BUFFER_MANDO}[${INDICE_MANDO}]. No se escribe nada sin ver antes lo que hay.`);
+        return CODIGO.ERROR;
+      }
+      const pp = planificarPalabra(inicial.mando, o.palabra);
+      out('');
+      out(`PALABRA ENTERA: ${BUFFER_MANDO}[${INDICE_MANDO}] ← ${pp.aEscribir}`);
+      out(`  ahora:      ${describirPalabra(pp.actual)}`);
+      out(`  escribiría: ${describirPalabra(pp.nuevo)}  (cambian los bits {${pp.bitsQueCambian.join(',')}})`);
+      for (const a of pp.avisos) out(`  ⚠ ${a}`);
+      if (!pp.cambia) {
+        out('La palabra ya tiene ese valor: no hay nada que escribir.');
+        return CODIGO.OK;
+      }
+      if (!o.armar) {
+        out('');
+        out('SIMULACRO: no se ha escrito nada. Para escribir, repite con --armar, con un testigo mirando las válvulas y el caudal.');
+        return CODIGO.SIMULACRO;
+      }
+      abrirLog();
+      out('');
+      out(`⛔ ARMADA: se va a escribir ${BUFFER_MANDO}[${INDICE_MANDO}] ← ${pp.aEscribir} en ${CUENTA_ATRAS_SEG} s.`);
+      if (!(await cuentaAtras(CUENTA_ATRAS_SEG, { esperar: e.esperar, cancelado: e.cancelado, imprimir: out }))) {
+        out('CANCELADO con Ctrl+C: NO se escribió nada.');
+        return CODIGO.CANCELADO;
+      }
+      out(`ESCRIBIENDO ${BUFFER_MANDO}[${INDICE_MANDO}] ← ${pp.aEscribir}  (${hora(e.ahora())})`);
+      try {
+        await escribirElemento(session, nodeIds.mando, T_MANDO, pp.aEscribir);
+      } catch (err) {
+        out(`ESCRITURA RECHAZADA: ${mensaje(err)}. No se reintenta ni se deshace nada.`);
+        return CODIGO.ERROR;
+      }
+      out('  escritura aceptada por el servidor (StatusCode Good)');
+      let ecoOk = false;
+      try {
+        const eco = await leerElemento(session, nodeIds.mando, T_MANDO);
+        ecoOk = eco.value === pp.aEscribir;
+        out(ecoOk ? `  ECO OK: ${describirPalabra(Number(eco.value))}` : `  ⚠ ECO DISTINTO: se escribió ${pp.aEscribir} y se lee ${String(eco.value)} (calidad ${eco.quality}).`);
+      } catch (err) {
+        out(`  ⚠ no se pudo releer el eco: ${mensaje(err)}`);
+      }
+      const seg = segundosDeObservacion(o);
+      if (seg > 0) await observar(seg);
+      out('');
+      out(`FIN. ${BUFFER_MANDO}[${INDICE_MANDO}] queda en ${pp.aEscribir}. No se limpia nada al salir.`);
+      return ecoOk ? CODIGO.OK : CODIGO.ERROR;
+    }
 
     if (!o.valvula || !o.verbo) {
       const seg = segundosDeObservacion(o);

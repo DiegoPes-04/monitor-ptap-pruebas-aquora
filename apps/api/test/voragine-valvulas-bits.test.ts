@@ -28,6 +28,7 @@ import {
   nombreDelLog,
   otraValvula,
   parsearArgumentos,
+  planificarPalabra,
   planificar,
   segundosDeObservacion,
   verificarContraMapping,
@@ -186,6 +187,33 @@ test('plan --sin-ajenos: el 2 suelto del 2026-10-16 se apaga en la MISMA escritu
   }
 });
 
+test('palabra: valor exacto, primero 0 y después solo el bit 3 (decisión de campo 2026-10-16)', () => {
+  const cero = planificarPalabra(4106, 0);
+  assert.equal(cero.nuevo, 0);
+  assert.equal(cero.cambia, true);
+  assert.ok(cero.avisos.some((a) => /la entrada pasa de CERRAR a SIN SEÑAL/i.test(a)));
+  assert.ok(cero.avisos.some((a) => /la salida pasa de ABRIR a SIN SEÑAL/i.test(a)), 'se avisa de que la salida pierde su señal');
+  assert.ok(cero.avisos.some((a) => /bits ajenos \{1\}/.test(a)));
+
+  const bit3 = planificarPalabra(0, 8);
+  assert.equal(bit3.nuevo, 8);
+  assert.deepEqual(bit3.bitsQueCambian, [3]);
+
+  assert.equal(planificarPalabra(4104, 4104).cambia, false);
+  assert.throws(() => planificarPalabra(0, 2), /fuera de \{2,3,12,13\}/, 'el 2 suelto no se puede volver a escribir');
+  assert.throws(() => planificarPalabra(0, 12), /abrir y cerrar a la vez en la entrada/);
+  assert.throws(() => planificarPalabra(0, 4096 | 8192), /abrir y cerrar a la vez en la salida/);
+
+  const r = parsearArgumentos(['palabra', '0', '--armar', '--observar', '30']);
+  assert.ok(r.ok);
+  assert.equal(r.opciones.palabra, 0);
+  assert.equal(r.opciones.valvula, null);
+  assert.equal(segundosDeObservacion({ ...r.opciones, observarSeg: null }), OBSERVAR_POR_DEFECTO_SEG);
+  for (const malo of [['palabra'], ['palabra', 'x'], ['palabra', '70000'], ['palabra', '8', '--sin-ajenos'], ['palabra', '8', '9']]) {
+    assert.equal(parsearArgumentos(malo).ok, false, malo.join(' '));
+  }
+});
+
 test('argumentos: --sin-ajenos solo con una orden', () => {
   const r = parsearArgumentos(['entrada', 'cerrar', '--sin-ajenos', '--armar']);
   assert.ok(r.ok);
@@ -203,7 +231,7 @@ test('plan: si la palabra ya tiene el verbo, no hay nada que escribir', () => {
 test('argumentos: sin nada = solo estado; con orden = simulacro salvo --armar; 60 s de observación por defecto', () => {
   const r0 = parsearArgumentos([]);
   assert.ok(r0.ok);
-  assert.deepEqual(r0.opciones, { valvula: null, verbo: null, armar: false, sinAjenos: false, observarSeg: null, endpoint: null });
+  assert.deepEqual(r0.opciones, { valvula: null, verbo: null, armar: false, sinAjenos: false, palabra: null, observarSeg: null, endpoint: null });
   assert.equal(segundosDeObservacion(r0.opciones), 0);
 
   const r1 = parsearArgumentos(['salida', 'cerrar']);
@@ -213,7 +241,7 @@ test('argumentos: sin nada = solo estado; con orden = simulacro salvo --armar; 6
 
   const r2 = parsearArgumentos(['entrada', 'abrir', '--armar', '--observar', '15', 'opc.tcp://10.0.0.1:4840']);
   assert.ok(r2.ok);
-  assert.deepEqual(r2.opciones, { valvula: 'entrada', verbo: 'abrir', armar: true, sinAjenos: false, observarSeg: 15, endpoint: 'opc.tcp://10.0.0.1:4840' });
+  assert.deepEqual(r2.opciones, { valvula: 'entrada', verbo: 'abrir', armar: true, sinAjenos: false, palabra: null, observarSeg: 15, endpoint: 'opc.tcp://10.0.0.1:4840' });
 
   const r3 = parsearArgumentos(['--observar', '120']);
   assert.ok(r3.ok);

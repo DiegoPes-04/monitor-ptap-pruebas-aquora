@@ -214,6 +214,56 @@ export function planificar(
   };
 }
 
+export interface PlanPalabra {
+  actual: number;
+  nuevo: number;
+  aEscribir: number;
+  cambia: boolean;
+  bitsQueCambian: number[];
+  avisos: string[];
+}
+
+/**
+ * Escribir la palabra ENTERA con un valor exacto: `palabra 0`, luego `palabra 8`.
+ *
+ * Existe por una decisión de campo del 2026-10-16: con la entrada sin responder, se quiso poner el
+ * canal completo a 0 y DESPUÉS solo el bit 3, en dos escrituras separadas, en vez del cambio de par en
+ * una sola escritura que hace `planificar`. Va contra la regla del integrador («siempre una de las
+ * dos») mientras dura, y por eso se avisa de cada válvula que queda sin señal. Lo que sigue sin
+ * admitirse: bits fuera de {2,3,12,13} y abrir+cerrar a la vez en una válvula (el ERROR del integrador).
+ */
+export function planificarPalabra(palabraLeida: number, valor: number): PlanPalabra {
+  if (!Number.isInteger(valor) || valor < 0 || valor > 0xffff) {
+    throw new Error(`ABORTADO: ${valor} no es una palabra de 16 bits. No se escribe nada.`);
+  }
+  if ((valor & ~LISTA_BLANCA) !== 0) {
+    throw new Error(`ABORTADO: ${valor} ${textoBits(valor)} tiene bits fuera de {2,3,12,13} (${textoBits(valor & ~LISTA_BLANCA)}). No se escribe nada.`);
+  }
+  for (const v of ['entrada', 'salida'] as const) {
+    if (estadoDelPar(valor, v) === 'error') {
+      throw new Error(`ABORTADO: ${valor} pone abrir y cerrar a la vez en la ${v} (ERROR según el integrador). No se escribe nada.`);
+    }
+  }
+  const actual = aSinSigno16(palabraLeida);
+  const diff = valor ^ actual;
+  const avisos: string[] = [];
+  for (const v of ['entrada', 'salida'] as const) {
+    if (estadoDelPar(valor, v) === 'sin-senal' && estadoDelPar(actual, v) !== 'sin-senal') {
+      avisos.push(`la ${v} pasa de ${describirPar(estadoDelPar(actual, v))} a SIN SEÑAL (0/0): la regla del integrador lo prohíbe; mientras dure, su comportamiento depende de la lógica local.`);
+    }
+  }
+  const ajenos = actual & ~LISTA_BLANCA;
+  if (ajenos !== 0) avisos.push(`se APAGAN los bits ajenos ${textoBits(ajenos)}.`);
+  return {
+    actual,
+    nuevo: valor,
+    aEscribir: aConSigno16(valor),
+    cambia: diff !== 0,
+    bitsQueCambian: diff === 0 ? [] : bitsPuestos(diff),
+    avisos,
+  };
+}
+
 // ── Argumentos ──────────────────────────────────────────────────────────────────
 
 export const USO = [
@@ -225,6 +275,8 @@ export const USO = [
   '  npx tsx scripts/test-valvulas-voragine.ts <entrada|salida> <abrir|cerrar> --armar [--observar <seg>]',
   '                                                                         ESCRIBE (cuenta atrás de 5 s) y observa (60 s por defecto)',
   '  ... <entrada|salida> <abrir|cerrar> --sin-ajenos [--armar]             además APAGA los bits que no son de ninguna válvula',
+  '  npx tsx scripts/test-valvulas-voragine.ts palabra <valor> [--armar]    escribe la palabra ENTERA con ese valor exacto',
+  '                                                                         (solo bits 2,3,12,13; nunca abrir+cerrar a la vez)',
   '  Al final, opcional: opc.tcp://host:puerto  (si no, OPC_ENDPOINT del entorno o del .env)',
 ].join('\n');
 
@@ -234,6 +286,8 @@ export interface Opciones {
   armar: boolean;
   /** Apagar en la misma escritura los bits fuera de {2,3,12,13}. Solo con una orden. */
   sinAjenos: boolean;
+  /** Modo `palabra <valor>`: el valor exacto de la palabra entera. null en los demás modos. */
+  palabra: number | null;
   /** null = no se pidió (con orden se observan 60 s; sin orden, nada). */
   observarSeg: number | null;
   endpoint: string | null;
@@ -277,7 +331,16 @@ export function parsearArgumentos(argv: string[]): { ok: true; opciones: Opcione
   if (posicionales.length === 0) {
     if (armar) return { ok: false, error: '--armar sin válvula ni verbo: no hay nada que escribir' };
     if (sinAjenos) return { ok: false, error: '--sin-ajenos va con una orden: <entrada|salida> <abrir|cerrar> --sin-ajenos' };
-    return { ok: true, opciones: { valvula: null, verbo: null, armar, sinAjenos, observarSeg, endpoint } };
+    return { ok: true, opciones: { valvula: null, verbo: null, armar, sinAjenos, palabra: null, observarSeg, endpoint } };
+  }
+  if (posicionales[0] === 'palabra') {
+    if (posicionales.length !== 2 || !/^\d+$/.test(posicionales[1])) {
+      return { ok: false, error: 'palabra necesita un valor entero: palabra <0..65535>' };
+    }
+    const palabra = Number(posicionales[1]);
+    if (palabra > 0xffff) return { ok: false, error: `palabra: ${palabra} no cabe en 16 bits` };
+    if (sinAjenos) return { ok: false, error: '--sin-ajenos no aplica a palabra: el valor ya es exacto' };
+    return { ok: true, opciones: { valvula: null, verbo: null, armar, sinAjenos, palabra, observarSeg, endpoint } };
   }
   if (posicionales.length !== 2) {
     return { ok: false, error: `se esperan exactamente dos palabras, <entrada|salida> <abrir|cerrar>, y hay ${posicionales.length}: ${posicionales.join(' ')}` };
@@ -285,18 +348,19 @@ export function parsearArgumentos(argv: string[]): { ok: true; opciones: Opcione
   const [valvula, verbo] = posicionales;
   if (valvula !== 'entrada' && valvula !== 'salida') return { ok: false, error: `válvula desconocida: "${valvula}" (entrada | salida)` };
   if (verbo !== 'abrir' && verbo !== 'cerrar') return { ok: false, error: `verbo desconocido: "${verbo}" (abrir | cerrar)` };
-  return { ok: true, opciones: { valvula, verbo, armar, sinAjenos, observarSeg, endpoint } };
+  return { ok: true, opciones: { valvula, verbo, armar, sinAjenos, palabra: null, observarSeg, endpoint } };
 }
 
 /** Cuántos segundos observar: los pedidos; si no, 60 tras una orden y 0 en modo solo estado. */
 export function segundosDeObservacion(o: Opciones): number {
   if (o.observarSeg !== null) return o.observarSeg;
-  return o.valvula ? OBSERVAR_POR_DEFECTO_SEG : 0;
+  return o.valvula || o.palabra !== null ? OBSERVAR_POR_DEFECTO_SEG : 0;
 }
 
 /** `2026-10-16T20-24-20-538Z-salida-cerrar.log`: el ISO sin `:` ni `.`, que Windows no admite. */
-export function nombreDelLog(fecha: Date, o: Pick<Opciones, 'valvula' | 'verbo'>): string {
+export function nombreDelLog(fecha: Date, o: Pick<Opciones, 'valvula' | 'verbo'> & { palabra?: number | null }): string {
   const iso = fecha.toISOString().replace(/[:.]/g, '-');
+  if (o.palabra !== undefined && o.palabra !== null) return `${iso}-palabra-${o.palabra}.log`;
   return o.valvula && o.verbo ? `${iso}-${o.valvula}-${o.verbo}.log` : `${iso}-observacion.log`;
 }
 
