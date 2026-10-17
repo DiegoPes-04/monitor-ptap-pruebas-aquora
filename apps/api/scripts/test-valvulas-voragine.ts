@@ -274,15 +274,20 @@ export async function ejecutar(e: Entorno): Promise<number> {
 
     // 3-bis) Modo `palabra <valor>`: la palabra ENTERA con un valor exacto (ver planificarPalabra).
     if (o.palabra !== null) {
-      if (inicial.mando === null) {
-        out(`ERROR: no se pudo leer ${BUFFER_MANDO}[${INDICE_MANDO}]. No se escribe nada sin ver antes lo que hay.`);
+      // Canal 1 = prueba de la entrada en INT_OUT_VORAGINE[1] (ver planificarCanal1).
+      const tCanal: BufferElementTarget = { ...T_MANDO, index: o.canal };
+      const actualCanal = o.canal === 1 ? await leerNumero(session, nodeIds.mando, tCanal) : inicial.mando;
+      const etiqueta = `${BUFFER_MANDO}[${o.canal}]`;
+      const describir = (v: number): string => (o.canal === 1 ? `${v} ${textoBits(v)} (canal 1: solo bits de la entrada)` : describirPalabra(v));
+      if (actualCanal === null) {
+        out(`ERROR: no se pudo leer ${etiqueta}. No se escribe nada sin ver antes lo que hay.`);
         return CODIGO.ERROR;
       }
-      const pp = planificarPalabra(inicial.mando, o.palabra);
+      const pp = planificarPalabra(actualCanal, o.palabra, o.canal);
       out('');
-      out(`PALABRA ENTERA: ${BUFFER_MANDO}[${INDICE_MANDO}] ← ${pp.aEscribir}`);
-      out(`  ahora:      ${describirPalabra(pp.actual)}`);
-      out(`  escribiría: ${describirPalabra(pp.nuevo)}  (cambian los bits {${pp.bitsQueCambian.join(',')}})`);
+      out(`PALABRA ENTERA: ${etiqueta} ← ${pp.aEscribir}`);
+      out(`  ahora:      ${describir(pp.actual)}`);
+      out(`  escribiría: ${describir(pp.nuevo)}  (cambian los bits {${pp.bitsQueCambian.join(',')}})`);
       for (const a of pp.avisos) out(`  ⚠ ${a}`);
       if (!pp.cambia) {
         out('La palabra ya tiene ese valor: no hay nada que escribir.');
@@ -295,14 +300,14 @@ export async function ejecutar(e: Entorno): Promise<number> {
       }
       abrirLog();
       out('');
-      out(`⛔ ARMADA: se va a escribir ${BUFFER_MANDO}[${INDICE_MANDO}] ← ${pp.aEscribir} en ${CUENTA_ATRAS_SEG} s.`);
+      out(`⛔ ARMADA: se va a escribir ${etiqueta} ← ${pp.aEscribir} en ${CUENTA_ATRAS_SEG} s.`);
       if (!(await cuentaAtras(CUENTA_ATRAS_SEG, { esperar: e.esperar, cancelado: e.cancelado, imprimir: out }))) {
         out('CANCELADO con Ctrl+C: NO se escribió nada.');
         return CODIGO.CANCELADO;
       }
-      out(`ESCRIBIENDO ${BUFFER_MANDO}[${INDICE_MANDO}] ← ${pp.aEscribir}  (${hora(e.ahora())})`);
+      out(`ESCRIBIENDO ${etiqueta} ← ${pp.aEscribir}  (${hora(e.ahora())})`);
       try {
-        await escribirElemento(session, nodeIds.mando, T_MANDO, pp.aEscribir);
+        await escribirElemento(session, nodeIds.mando, tCanal, pp.aEscribir);
       } catch (err) {
         out(`ESCRITURA RECHAZADA: ${mensaje(err)}. No se reintenta ni se deshace nada.`);
         return CODIGO.ERROR;
@@ -310,16 +315,16 @@ export async function ejecutar(e: Entorno): Promise<number> {
       out('  escritura aceptada por el servidor (StatusCode Good)');
       let ecoOk = false;
       try {
-        const eco = await leerElemento(session, nodeIds.mando, T_MANDO);
+        const eco = await leerElemento(session, nodeIds.mando, tCanal);
         ecoOk = eco.value === pp.aEscribir;
-        out(ecoOk ? `  ECO OK: ${describirPalabra(Number(eco.value))}` : `  ⚠ ECO DISTINTO: se escribió ${pp.aEscribir} y se lee ${String(eco.value)} (calidad ${eco.quality}).`);
+        out(ecoOk ? `  ECO OK: ${describir(Number(eco.value))}` : `  ⚠ ECO DISTINTO: se escribió ${pp.aEscribir} y se lee ${String(eco.value)} (calidad ${eco.quality}).`);
       } catch (err) {
         out(`  ⚠ no se pudo releer el eco: ${mensaje(err)}`);
       }
       const seg = segundosDeObservacion(o);
       if (seg > 0) await observar(seg);
       out('');
-      out(`FIN. ${BUFFER_MANDO}[${INDICE_MANDO}] queda en ${pp.aEscribir}. No se limpia nada al salir.`);
+      out(`FIN. ${etiqueta} queda en ${pp.aEscribir}. No se limpia nada al salir.`);
       return ecoOk ? CODIGO.OK : CODIGO.ERROR;
     }
 

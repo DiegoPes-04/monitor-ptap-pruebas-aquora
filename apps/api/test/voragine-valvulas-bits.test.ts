@@ -214,6 +214,26 @@ test('palabra: valor exacto, primero 0 y después solo el bit 3 (decisión de ca
   }
 });
 
+test('palabra --canal 1: solo 0, 4 u 8 en INT_OUT_VORAGINE[1] (prueba de la entrada, 2026-10-17)', () => {
+  assert.equal(planificarPalabra(0, 4, 1).nuevo, 4);
+  assert.equal(planificarPalabra(4, 0, 1).nuevo, 0);
+  assert.equal(planificarPalabra(0, 8, 1).nuevo, 8);
+  assert.ok(planificarPalabra(0, 8, 1).avisos.some((a) => /un solo elemento/.test(a)), 'avisa de que el MSG enviaba solo el elemento 0');
+  assert.ok(planificarPalabra(1024, 4, 1).avisos.some((a) => /se APAGAN/.test(a)), 'lo que hubiera en el canal 1 se dice');
+  assert.throws(() => planificarPalabra(0, 4096, 1), /solo se admiten los bits de la entrada/, 'nada de la salida en el canal 1');
+  assert.throws(() => planificarPalabra(0, 2, 1), /solo se admiten los bits de la entrada/);
+  assert.throws(() => planificarPalabra(0, 12, 1), /abrir y cerrar a la vez/);
+
+  const r = parsearArgumentos(['palabra', '8', '--canal', '1', '--armar']);
+  assert.ok(r.ok);
+  assert.equal(r.opciones.canal, 1);
+  for (const malo of [['--canal', '1'], ['entrada', 'cerrar', '--canal', '1'], ['palabra', '8', '--canal', '2'], ['palabra', '8', '--canal']]) {
+    assert.equal(parsearArgumentos(malo).ok, false, malo.join(' '));
+  }
+  const fecha = new Date('2026-10-17T14:00:00.000Z');
+  assert.equal(nombreDelLog(fecha, { valvula: null, verbo: null, palabra: 8, canal: 1 }), '2026-10-17T14-00-00-000Z-palabra-canal1-8.log');
+});
+
 test('argumentos: --sin-ajenos solo con una orden', () => {
   const r = parsearArgumentos(['entrada', 'cerrar', '--sin-ajenos', '--armar']);
   assert.ok(r.ok);
@@ -231,7 +251,7 @@ test('plan: si la palabra ya tiene el verbo, no hay nada que escribir', () => {
 test('argumentos: sin nada = solo estado; con orden = simulacro salvo --armar; 60 s de observación por defecto', () => {
   const r0 = parsearArgumentos([]);
   assert.ok(r0.ok);
-  assert.deepEqual(r0.opciones, { valvula: null, verbo: null, armar: false, sinAjenos: false, palabra: null, observarSeg: null, endpoint: null });
+  assert.deepEqual(r0.opciones, { valvula: null, verbo: null, armar: false, sinAjenos: false, palabra: null, canal: 0, observarSeg: null, endpoint: null });
   assert.equal(segundosDeObservacion(r0.opciones), 0);
 
   const r1 = parsearArgumentos(['salida', 'cerrar']);
@@ -241,7 +261,7 @@ test('argumentos: sin nada = solo estado; con orden = simulacro salvo --armar; 6
 
   const r2 = parsearArgumentos(['entrada', 'abrir', '--armar', '--observar', '15', 'opc.tcp://10.0.0.1:4840']);
   assert.ok(r2.ok);
-  assert.deepEqual(r2.opciones, { valvula: 'entrada', verbo: 'abrir', armar: true, sinAjenos: false, palabra: null, observarSeg: 15, endpoint: 'opc.tcp://10.0.0.1:4840' });
+  assert.deepEqual(r2.opciones, { valvula: 'entrada', verbo: 'abrir', armar: true, sinAjenos: false, palabra: null, canal: 0, observarSeg: 15, endpoint: 'opc.tcp://10.0.0.1:4840' });
 
   const r3 = parsearArgumentos(['--observar', '120']);
   assert.ok(r3.ok);
