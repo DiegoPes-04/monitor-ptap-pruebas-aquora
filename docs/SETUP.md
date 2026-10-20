@@ -251,7 +251,7 @@ El montaje está bien **solo si estos 5 pasan**:
 ```bash
 npm run typecheck                      # 1. limpio en los 3 workspaces
 npm test -w @ptap/api                  # 2. 235/235 tests en verde
-npm run validate:mapping -w @ptap/api  # 3. "opc_mapping.json válido (12 plantas)"
+npm run validate:mapping -w @ptap/api  # 3. "opc_mapping.json válido (16 plantas)"
 ```
 4. `POST /api/auth/login` con `admin@ptap.co` devuelve un JWT (§7).
 5. En `http://localhost:8081`: entrar como `civil@ptap.co` cae en *Estado*; como `admin@ptap.co`
@@ -352,6 +352,10 @@ a la aprobación.
   se marca `confirmed` con documentación oficial.
 - **`san-antonio` y `quijote` sin señales propias.** Sus tanques llegan retransmitidos vía Soledad;
   pendiente de rectificar con el operador.
+- **`cabuyo`, `luisa`, `leonera` y `gloria` sin señales y siempre en `frozen`.** Están en
+  integración: dadas de alta en el mapping sin buffers hasta que el integrador las suba al PLC
+  maestro (ficha en `docs/plc/PLANTAS_NUEVAS_CABUYO_LUISA_LEONERA_GLORIA.md`). No les llega ningún
+  dato, y eso es lo que muestran.
 - **Con el simulador, los comandos de válvula responden contra un almacén en RAM**, no contra un
   PLC. Es el testbed permanente y así debe ser.
 - **`READBACK_UNCONFIRMED` en producción no es un fallo del canal**: hoy falta el actuador físico en

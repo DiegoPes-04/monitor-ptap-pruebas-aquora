@@ -162,6 +162,43 @@ test('liveness: tras congelarse, un cambio nuevo lo devuelve a live de inmediato
   assert.equal(lt.get('m', true).state, 'live', 'apenas vuelve el dato, la planta vuelve a estar viva');
 });
 
+/**
+ * Planta dada de alta SIN un solo buffer de datos: Cabuyo, La Luisa, La Leonera y Gloria desde el
+ * 2026-10-19, que aún no están en el PLC maestro. El beneficio de la duda del arranque es para buffers
+ * que todavía no entregaron su segunda muestra; aquí no va a llegar ninguno. Concederlo pintaba
+ * ESTABLE —y «Sistema operativo, enviando datos» en la vista Civil— los primeros 5 min de cada
+ * arranque, de una planta que no está en el PLC.
+ */
+test('liveness: planta SIN buffers de datos → frozen desde el arranque, nunca stable', () => {
+  const lt = new LivenessTracker(10, 300);
+  const t0 = Date.now();
+  lt.configurePlant('cabuyo', null, false);
+  assert.equal(lt.get('cabuyo', true, t0).state, 'frozen', 'no hay ningún buffer cuya llegada esperar');
+  assert.equal(lt.get('cabuyo', true, t0 + 301_000).state, 'frozen');
+  assert.equal(lt.get('cabuyo', false, t0).state, 'frozen');
+  assert.equal(lt.get('cabuyo', true, t0).windowSec, 300, 'la ventana sigue siendo la de siempre');
+});
+
+test('liveness: con buffers (el default de configurePlant) se conserva el beneficio de la duda del arranque', () => {
+  const lt = new LivenessTracker(10, 300);
+  const t0 = Date.now();
+  lt.configurePlant('voragine', null);
+  lt.configurePlant('soledad', 120, true);
+  assert.equal(lt.get('voragine', true, t0).state, 'stable');
+  assert.equal(lt.get('soledad', true, t0).state, 'stable');
+  assert.equal(lt.get('soledad', true, t0).windowSec, 120);
+});
+
+test('liveness: si a una planta declarada sin buffers le llega un frame, manda la regla normal', () => {
+  // «Sin buffers» es lo que dice el mapping; un frame real dice otra cosa, y el dato gana.
+  const lt = new LivenessTracker(10, 300);
+  lt.configurePlant('leonera', null, false);
+  lt.ingest(frame('leonera', [buf('B', 'realIn', [1])]));
+  assert.equal(lt.get('leonera', true).state, 'stable', 'primera muestra: sin delta, beneficio de la duda');
+  lt.ingest(frame('leonera', [buf('B', 'realIn', [2])]));
+  assert.equal(lt.get('leonera', true).state, 'live');
+});
+
 // ── MappingEngine (PASO 3.4) ─────────────────────────────────────────────────
 
 function montebelloMapping(): LoadedMapping {

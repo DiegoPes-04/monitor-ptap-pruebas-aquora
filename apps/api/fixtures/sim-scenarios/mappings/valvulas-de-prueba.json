@@ -15,7 +15,8 @@
     "sim-una: 1 valvula, bit0 abre / bit1 cierra en INT_OUT[0] (la codificacion de Carbonero), con read-back verificado para ejercitar el camino confirmado.",
     "sim-dos: 2 valvulas en la MISMA palabra INT_OUT[0]: A bits 0/1, B bits 2/3.",
     "sim-tres: 3 valvulas en la MISMA palabra INT_OUT[0]: A bits 0/1, B bits 2/3, C bits 4/5.",
-    "sim-buffers: valvulas en buffers distintos: absoluta 1/2 (La Sirena), mascara 4096/8192 en otro INT_OUT con pulse.until (La Voragine) y dos bobinas en bitOut con orden compuesta."
+    "sim-buffers: valvulas en buffers distintos: absoluta 1/2 (La Sirena), mascara 4096/8192 en otro INT_OUT con pulse.until (La Voragine) y dos bobinas en bitOut con orden compuesta.",
+    "sim-proporcional: valvula de salida PROPORCIONAL de solo lectura (valve1Position en realIn, 0-100 %, sin valve1), como la que traen Cabuyo, La Luisa, La Leonera y Gloria. Sin mando: no suma valvulas al simulador."
   ],
   "plants": [
     {
@@ -870,6 +871,71 @@
         {
           "buffer": "realIn",
           "index": 3,
+          "domainKey": "inletFlow1",
+          "label": "Caudal de entrada (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        }
+      ]
+    },
+    {
+      "plantId": "sim-proporcional",
+      "displayName": "SIM · válvula proporcional",
+      "displayNameProvisional": true,
+      "opcBuffers": {
+        "realIn": [
+          {
+            "browseName": "REAL_IN_SIM_PROP",
+            "node": {
+              "nsUri": "SIMULADOR",
+              "identifier": "s=SIM.REAL_IN_SIM_PROP"
+            },
+            "arrayLength": 10,
+            "dataType": "Float"
+          }
+        ]
+      },
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "inferred"
+      },
+      "signals": [
+        {
+          "buffer": "realIn",
+          "index": 0,
+          "domainKey": "valve1Position",
+          "label": "Válvula de salida (proporcional, sim)",
+          "_nota": "Convención de la válvula proporcional: valve<N>Position en realIn, unit %, 0-100, con label y flowDomainKey, y SIN valve<N> mientras no exista la fase de consigna. La app la muestra como apertura de solo lectura. El simulador genera 10-90 en realIn, así que la apertura se ve moverse.",
+          "unit": "%",
+          "min": 0,
+          "max": 100,
+          "flowDomainKey": "outletFlow1",
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 1,
+          "domainKey": "outletFlow1",
+          "label": "Caudal de salida (sim)",
+          "unit": "l/s",
+          "min": 0,
+          "max": 1000,
+          "mappingStatus": "mapped",
+          "confidence": "inferred",
+          "writable": false
+        },
+        {
+          "buffer": "realIn",
+          "index": 2,
           "domainKey": "inletFlow1",
           "label": "Caudal de entrada (sim)",
           "unit": "l/s",

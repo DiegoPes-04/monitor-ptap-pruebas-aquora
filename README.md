@@ -1,9 +1,12 @@
 # Monitor PTAP
 
-Sistema de **monitoreo en tiempo real de 12 Plantas de Tratamiento de Agua Potable (PTAP)**,
+Sistema de **monitoreo en tiempo real de 16 Plantas de Tratamiento de Agua Potable (PTAP)**,
 conectadas a través de un PLC maestro Allen-Bradley expuesto por un servidor **FactoryTalk
-Optix OPC UA**. El backend lee los buffers crudos del PLC, los procesa por un pipeline de
-capas y los publica a la app móvil/web por REST y Socket.IO.
+Optix OPC UA**. Doce están en operación. Cabuyo, La Luisa, La Leonera y Gloria están en
+integración: dadas de alta sin señales hasta que el integrador las suba al PLC maestro (ficha en
+[`docs/plc/PLANTAS_NUEVAS_CABUYO_LUISA_LEONERA_GLORIA.md`](docs/plc/PLANTAS_NUEVAS_CABUYO_LUISA_LEONERA_GLORIA.md)).
+El backend lee los buffers crudos del PLC, los procesa por un pipeline de capas y los publica a
+la app móvil/web por REST y Socket.IO.
 
 > **Estado real (2026-08-05):** el puente OPC UA está **vivo contra el PLC real** y la telemetría
 > viaja de punta a punta (PLC → backend → móvil) en tiempo real. La telemetría vive **solo en RAM**
@@ -50,7 +53,7 @@ capas y los publica a la app móvil/web por REST y Socket.IO.
 
 | Fase | Alcance | Estado | Evidencia |
 |------|---------|--------|-----------|
-| **0** | Contratos (`opc_mapping.schema.json`/`.json`), hallazgo de seguridad P0 | ✅ Completa | `npm run validate:mapping` → 12 plantas OK; `docs/SECURITY_FINDING_P0.md`, `docs/plc/OBSERVACIONES_FASE0.md` |
+| **0** | Contratos (`opc_mapping.schema.json`/`.json`), hallazgo de seguridad P0 | ✅ Completa | `npm run validate:mapping` → 16 plantas OK (4 en integración, sin señales); `docs/SECURITY_FINDING_P0.md`, `docs/plc/OBSERVACIONES_FASE0.md` |
 | **1** | Adaptador OPC UA real, `BridgeStatus`, watchdog, heartbeat, reconexión, `/api/opc/status`\|`info`\|`buffers` | ✅ Completa | `bridge-state-machine.ts`, `watchdog.ts`, `heartbeat-monitor.ts`; tests de bridge en verde |
 | **2** | Parser + sequence + dead letter + cache RAM + Socket.IO con datos reales | ✅ Completa | `plant-pipeline.service.ts`, `/api/opc/dead-letter`; caudal de Montebello confirmado contra el PLC (`docs/plc/OBSERVACIONES_FASE0.md` §4). Replay contra tramas REALES: `test/plc-replay.test.ts` |
 | **3** | Mapping Engine + Quality Service + Snapshot Builder + `dtoVersion` | ✅ Completa | `mapping.engine.ts`, `quality.evaluator.ts`, `snapshot.builder.ts` |
@@ -476,7 +479,7 @@ RBAC gatea por **permiso granular** (`@RequirePermission(...)`, sobre `hasPermis
 
 | Método · Ruta | Devuelve |
 |---------------|----------|
-| `GET /api/plants` | Lista de las 12 plantas con su `liveness` y `bridgeStatus`. |
+| `GET /api/plants` | Lista de las 16 plantas con su `liveness` y `bridgeStatus`. Las 4 en integración no tienen buffers: salen siempre `frozen`. |
 | `GET /api/plants/:plantId/snapshot` | `PlantSnapshotDto` desde cache RAM (<50 ms; nunca toca el PLC). |
 
 > **Divergencia conocida con la matriz oficial (decisión de producto pendiente):** la matriz dice
@@ -700,8 +703,9 @@ Reglas que **nunca** se rompen (resumen):
 12. **Nada se pierde en silencio**: lo anómalo va al DeadLetter (consultable por endpoint admin).
 
 **Identidad de planta:** el `plantId` (slug canónico) es la única identidad en todo el sistema
-(los 12 slugs: `voragine, soledad, montebello, cascajal, km18, alto-los-mangos, campoalegre,
-pichinde, carbonero, sirena, san-antonio, quijote`). Nada de `PTAP Norte` ni `ptap-1`.
+(los 16 slugs: `voragine, soledad, montebello, cascajal, km18, alto-los-mangos, campoalegre,
+pichinde, carbonero, sirena, san-antonio, quijote, cabuyo, luisa, leonera, gloria`; las 4 últimas
+están en integración, sin señales). Nada de `PTAP Norte` ni `ptap-1`.
 
 ---
 

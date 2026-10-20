@@ -145,6 +145,8 @@ importar `ConnectivityModule` nunca obligue a tener MySQL arriba.
 
 El `plantId` (**slug canónico**) es la única identidad en todo el sistema: `voragine, soledad,
 montebello, cascajal, km18, alto-los-mangos, campoalegre, pichinde, carbonero, sirena,
-san-antonio, quijote`. Nada de `PTAP Norte` ni `ptap-1`. Los índices de array **no son
+san-antonio, quijote, cabuyo, luisa, leonera, gloria` (16; las 4 últimas están en integración,
+dadas de alta sin señales hasta que el integrador las suba al PLC maestro). Nada de `PTAP Norte`
+ni `ptap-1`. Los índices de array **no son
 transferibles entre plantas** (`realIn[5]` es caudal en Montebello y nivel de tanque en
 Campoalegre): siempre se direcciona por `(plantId, domainKey)`.

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Subject } from 'rxjs';
+import type { PlantListItem } from '@ptap/shared';
 import { CONNECTIVITY_ADAPTER, CONNECTIVITY_CONFIG } from '../connectivity.tokens';
 import type { ConnectivityConfig } from '../connectivity.config';
 import { loadMapping, type LoadedMapping } from '../mapping/opc-mapping.loader';
@@ -37,6 +38,13 @@ export class PlantPipelineService implements OnModuleInit, OnModuleDestroy {
   private engine: MappingEngine;
   private readonly liveness: LivenessTracker;
   private readonly deadLetter: DeadLetterBuffer;
+  /**
+   * Plantas dadas de alta en el mapping SIN un solo buffer de datos: existen, pero todavía no están
+   * conectadas al PLC maestro. Es el ÚNICO criterio de «en integración» del sistema, y decide dos
+   * cosas: su liveness (el tracker no les concede el `stable` del arranque) y el `integrationPending`
+   * de su snapshot, de `GET /api/plants` y del estado básico.
+   */
+  private readonly enIntegracion: ReadonlySet<string>;
 
   // Estado ACUMULADO por planta: última muestra de cada buffer (para reconstruir el DTO
   // completo aunque el frame coalescido traiga solo los buffers que cambiaron).
@@ -64,7 +72,18 @@ export class PlantPipelineService implements OnModuleInit, OnModuleDestroy {
     this.mapping = this.baseMapping;
     this.engine = new MappingEngine(this.mapping);
     this.liveness = new LivenessTracker(config.liveness.liveSec, config.liveness.windowSec);
-    for (const p of this.mapping.plants) this.liveness.configurePlant(p.plantId, p.livenessWindowSec);
+    // Una planta sin un solo buffer de datos (alta a la espera del integrador) no recibirá frames
+    // nunca, y el tracker no le concede el `stable` del arranque (ver `configurePlant`). Los overrides
+    // no tocan buffers, así que esto no cambia en caliente: se calcula una vez, aquí.
+    this.enIntegracion = new Set(
+      this.mapping.plants
+        .filter((p) => !this.mapping.targets.some((t) => t.plantId === p.plantId))
+        .map((p) => p.plantId),
+    );
+    for (const p of this.mapping.plants) {
+      const tieneBuffers = !this.enIntegracion.has(p.plantId);
+      this.liveness.configurePlant(p.plantId, p.livenessWindowSec, tieneBuffers);
+    }
   }
 
   onModuleInit(): void {
@@ -157,7 +176,7 @@ export class PlantPipelineService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Lista de plantas con su liveness actual (para GET /api/plants), incluso sin snapshot aún. */
-  listPlants(): { plantId: string; displayName: string; liveness: ReturnType<LivenessTracker['get']>; bridgeStatus: string }[] {
+  listPlants(): PlantListItem[] {
     const bridgeStatus = this.adapter.getBridgeStatus();
     const healthy = bridgeStatus === 'Connected';
     return this.mapping.plants.map((p) => ({
@@ -165,6 +184,8 @@ export class PlantPipelineService implements OnModuleInit, OnModuleDestroy {
       displayName: p.displayName,
       liveness: this.liveness.get(p.plantId, healthy),
       bridgeStatus,
+      // Solo cuando es true, igual que en el snapshot: ausente = planta conectada.
+      ...(this.enIntegracion.has(p.plantId) ? { integrationPending: true as const } : {}),
     }));
   }
 
@@ -213,6 +234,7 @@ export class PlantPipelineService implements OnModuleInit, OnModuleDestroy {
       liveness,
       extracted,
       deadLetter: this.deadLetter,
+      integrationPending: this.enIntegracion.has(plantId),
     });
     // La autonomía la calcula el detector una vez por minuto, con su temporizador estable; aquí
     // solo se adjunta. Recalcularla en cada frame devolvería el baile que el cliente pidió evitar.
@@ -222,8 +244,10 @@ export class PlantPipelineService implements OnModuleInit, OnModuleDestroy {
     // Diff: firma sin sequence. No emitir snapshots idénticos (PASO 3.7). Firma BARATA (sin
     // JSON.stringify de todo el objeto en CADA frame): solo los campos que cambian en runtime
     // distinguen un snapshot — value/quality/usable/reason/ts por señal + liveness + bridge. Los
-    // estáticos del mapping (unit/label/mappingStatus/confidence/opMin/opMax/stateEncoding) no cambian sin
-    // reiniciar, así que omitirlos NO altera la decisión de diff, y se ahorra CPU en el hot path.
+    // estáticos del mapping (unit/label/mappingStatus/confidence/opMin/opMax/stateEncoding, y el
+    // `integrationPending` de la planta) no cambian sin reiniciar, así que omitirlos NO altera la
+    // decisión de diff, y se ahorra CPU en el hot path. Un estático no se pierde por quedar fuera:
+    // va en TODOS los candidatos, así que el primer snapshot emitido de cada planta ya lo lleva.
     let signature = `${bridgeStatus}|${liveness.state}|${liveness.lastChangeAt ?? ''}|${liveness.windowSec ?? ''}`;
     for (const key of Object.keys(candidate.signals)) {
       const sig = candidate.signals[key];

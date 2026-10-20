@@ -5,43 +5,9 @@ import { useBasicStatus } from '../../hooks/useBasicStatus';
 import { PLANTS } from '../../context/PlantContext';
 import { useAuth } from '../../context/AuthContext';
 import Colors from '../../constants/colors';
-import type { LivenessState } from '../../services/api';
-
-/**
- * Veredicto de "¿el sistema está funcionando?" para la vista Civil — la única pregunta que
- * el Civil necesita responder según la matriz oficial. Combina el estado del PUENTE con la
- * FRESCURA de datos (liveness), porque un puente Connected que ya no recibe datos no está
- * realmente "operativo": está congelado. La paleta es la misma que LiveBadge (coherencia).
- *
- * El parámetro se mantiene como `string` a propósito (aunque el DTO ya viene tipado con los 6
- * estados desde @ptap/shared — DEF-08): el `default` cubre cualquier valor inesperado de un
- * backend más nuevo sin romper la pantalla.
- */
-function systemHealth(
-  bridgeStatus: string | undefined,
-  liveness: LivenessState,
-): { icon: keyof typeof Ionicons.glyphMap; color: string; title: string; desc: string } {
-  // `frozen` manda sobre todo: si perdimos la fuente, da igual lo que diga el resto.
-  if (liveness === 'frozen') {
-    return { icon: 'close-circle', color: Colors.danger, title: 'Sin conexión con la planta', desc: 'No se están recibiendo datos en este momento. Reintentando automáticamente.' };
-  }
-
-  switch (bridgeStatus) {
-    // Con la sesión sana, `live` y `stable` son AMBOS funcionamiento normal: una planta en
-    // régimen estable (tanque a nivel constante) no es una avería y no debe alarmar al Civil.
-    case 'Connected':
-      return { icon: 'checkmark-circle', color: Colors.success, title: 'Sistema operativo', desc: 'La planta está en funcionamiento y enviando datos.' };
-    case 'Recovering':
-    case 'Stale':
-    case 'Connecting':
-      return { icon: 'alert-circle', color: Colors.warning, title: 'Sistema con intermitencias', desc: 'La conexión con la planta es inestable en este momento.' };
-    case 'Disconnected':
-    case 'Faulted':
-      return { icon: 'close-circle', color: Colors.danger, title: 'Sistema fuera de línea', desc: 'No hay conexión con la planta en este momento.' };
-    default:
-      return { icon: 'help-circle-outline', color: Colors.neutral, title: 'Estado no disponible', desc: 'Aún no se reciben datos de la planta.' };
-  }
-}
+// El veredicto «¿el sistema funciona?» vive en el servicio, junto al badge del tablero: las dos
+// pantallas tienen que decir lo mismo de la misma planta, también si está en integración.
+import { systemHealth } from '../../services/plant-status';
 
 export default function EstadoScreen() {
   const { user } = useAuth();
@@ -52,7 +18,7 @@ export default function EstadoScreen() {
   // "¿el sistema funciona?" y "¿hay agua?". El veredicto del agua lo deriva el backend, que
   // es quien tiene las lecturas de tanque — aquí nunca llegan valores crudos del PLC.
   const { data: status } = useBasicStatus(plantId);
-  const system = systemHealth(status?.bridgeStatus, status?.liveness?.state ?? 'frozen');
+  const system = systemHealth(status?.bridgeStatus, status?.liveness?.state ?? 'frozen', status?.integrationPending === true);
 
   const water =
     status?.waterAvailable === true

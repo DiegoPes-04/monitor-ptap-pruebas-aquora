@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { accionDisponible } from '../services/valves';
+import { accionDisponible, anchoBarraApertura, textoApertura } from '../services/valves';
 import type { SupervisedValve } from '../hooks/useValveSupervisor';
 import Colors from '../constants/colors';
 import { sameValveItem } from './memo-compare';
@@ -37,6 +37,11 @@ const STATE_LABEL: Record<SupervisedValve['state'], string> = {
  *
  * Qué acción hay disponible lo decide `accionDisponible` en `services/valves.ts`, que está probada
  * sin UI: aquí solo se pinta su veredicto.
+ *
+ * Una válvula PROPORCIONAL suma su apertura («Apertura 47 %») y una barra de 0 a 100 %, con el mismo
+ * trazo que la barra de `FlowMeterCard`: un `View` con ancho en %, nada de módulo nativo de slider
+ * (la app no se autoactualiza y un módulo nativo obliga a recompilar la APK). Es de solo lectura: la
+ * consigna aún no se puede enviar y la fila lo dice con el motivo de `setpoint-pending`.
  */
 function ValveItemBase({ valve, onToggle, frozen = false, busy = false }: Props) {
   // Estado EFECTIVO: el que sigue al caudal si se detectó operación manual, para no mandar "abrir"
@@ -75,6 +80,25 @@ function ValveItemBase({ valve, onToggle, frozen = false, busy = false }: Props)
             </View>
           )}
         </View>
+        {valve.kind === 'proportional' && (
+          <View style={styles.apertura}>
+            <Text style={styles.aperturaTexto}>{textoApertura(valve.positionPct)}</Text>
+            <View
+              style={styles.barOuter}
+              accessibilityRole="progressbar"
+              accessibilityLabel={`Apertura de ${valve.name}`}
+              accessibilityValue={
+                valve.positionPct === null
+                  ? { text: 'sin dato' }
+                  : { min: 0, max: 100, now: Math.round(anchoBarraApertura(valve.positionPct)) }
+              }
+            >
+              {valve.positionPct !== null && (
+                <View style={[styles.barFill, { width: `${anchoBarraApertura(valve.positionPct)}%`, backgroundColor: color }]} />
+              )}
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={styles.right}>
@@ -113,8 +137,11 @@ function ValveItemBase({ valve, onToggle, frozen = false, busy = false }: Props)
 
         {/* Sin acción: se dice el motivo. Un hueco mudo se lee como un fallo de la app o como un
             permiso que falta, y casi nunca es ninguna de las dos cosas. */}
+        {/* 4 líneas y no 3: el motivo de `setpoint-pending` (~100 caracteres) en esta columna de
+            ~46 % de ancho y a 10 pt no cabría en 3 en un teléfono estrecho, y se cortaría justo en
+            «solo se muestra la apertura». */}
         {accion.kind === 'blocked' && (
-          <Text style={styles.sinMando} numberOfLines={3}>
+          <Text style={styles.sinMando} numberOfLines={4}>
             {accion.explain}
           </Text>
         )}
@@ -167,6 +194,11 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   tagNeutralText: { fontSize: 11, fontWeight: '700', color: Colors.textSecondary, letterSpacing: 0.3 },
+  apertura: { marginTop: 6, marginRight: 10, gap: 4 },
+  aperturaTexto: { fontSize: 12, color: Colors.textSecondary, fontVariant: ['tabular-nums'] },
+  // La misma barra que `FlowMeterCard`: pista en el color de fondo y relleno con ancho en %.
+  barOuter: { height: 8, borderRadius: 4, backgroundColor: Colors.surface, overflow: 'hidden' },
+  barFill: { height: '100%', borderRadius: 4 },
   right: { alignItems: 'flex-end', gap: 6, maxWidth: '46%' },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   badgeText: { fontSize: 12, fontWeight: '700' },

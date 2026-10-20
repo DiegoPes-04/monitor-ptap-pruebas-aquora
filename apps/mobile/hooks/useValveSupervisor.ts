@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sendValveCommand } from '../services/api';
-import { detectManual, interpretCommand, type CommandVerdict, type ValveState, type ValveView } from '../services/valves';
+import {
+  detectManual,
+  interpretCommand,
+  vigilaOperacionManual,
+  type CommandVerdict,
+  type ValveState,
+  type ValveView,
+} from '../services/valves';
 
 /**
  * Supervisor de electroválvulas: mantiene el estado de la app CONSISTENTE con la realidad física y
@@ -55,6 +62,8 @@ export function useValveSupervisor(plantId: string, valves: ValveView[]) {
   // Detección de operación manual + limpieza del override cuando el PLC ya coincide.
   useEffect(() => {
     for (const v of valves) {
+      // Las proporcionales no se vigilan: su apertura ya refleja quién la mueva (ver la función).
+      if (!vigilaOperacionManual(v)) continue;
       const before = prev.current[v.id];
       prev.current[v.id] = { flow: v.byFlow, state: v.byState };
       if (!before) continue; // primera lectura: no hay transición que juzgar
@@ -84,7 +93,8 @@ export function useValveSupervisor(plantId: string, valves: ValveView[]) {
   const supervised = useMemo<SupervisedValve[]>(
     () =>
       valves.map((v) => {
-        const ov = overrides[v.id];
+        // Por si una recarga del mapping convierte en proporcional una válvula que tenía override.
+        const ov = vigilaOperacionManual(v) ? overrides[v.id] : undefined;
         return { ...v, effectiveState: ov ?? v.state, manualOverride: ov !== undefined };
       }),
     [valves, overrides],

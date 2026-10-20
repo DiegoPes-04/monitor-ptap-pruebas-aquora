@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useAuth } from './AuthContext';
 
-/** Las 12 plantas canónicas (slug = identidad única del sistema; ver opc_mapping.json). */
+/** Las 16 plantas canónicas (slug = identidad única del sistema; ver opc_mapping.json). */
 export interface PlantOption {
   id: string; // slug canónico
   name: string; // displayName provisional
@@ -20,6 +20,11 @@ export const PLANTS: PlantOption[] = [
   { id: 'sirena', name: 'La Sirena' },
   { id: 'san-antonio', name: 'San Antonio' },
   { id: 'quijote', name: 'El Quijote' },
+  // En integración (2026-10-19): aún sin señales en el PLC maestro. Mismo orden que el mapping.
+  { id: 'cabuyo', name: 'Cabuyo' },
+  { id: 'luisa', name: 'La Luisa' },
+  { id: 'leonera', name: 'La Leonera' },
+  { id: 'gloria', name: 'Gloria' },
 ];
 
 /** Planta mostrada antes de saber quién ha iniciado sesión (las pantallas viven tras el login). */

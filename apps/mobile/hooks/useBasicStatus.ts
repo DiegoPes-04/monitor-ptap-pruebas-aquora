@@ -41,6 +41,9 @@ export function useBasicStatus(plantId: string) {
   const data = useMemo<PlantBasicStatusDto | undefined>(() => {
     const fresh = query.data;
     if (fresh && fresh.waterAvailable !== null) return fresh;
+    // Planta en integración: sin veredicto de agua porque aún no está conectada. El respaldo le
+    // forzaría `frozen` sin el `integrationPending`, y el Civil leería «Sin conexión… Reintentando».
+    if (fresh?.integrationPending) return fresh;
     const stored = getLastBasicStatus(plantId);
     if (!stored) return fresh;
     return {

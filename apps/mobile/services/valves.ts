@@ -14,22 +14,50 @@ import type { PlantSnapshotDto, SignalDto, ValveCommandResult } from './api';
  * Se muestran AMBOS y se cruzan: el método 1 manda (es la lectura del propio equipo) y el 2 corrobora.
  * Si discrepan se marca `disagreement` — eso es información valiosa para el operador (sensor de estado
  * o caudalímetro inconsistente), nunca se oculta eligiendo uno en silencio.
+ *
+ * VÁLVULA PROPORCIONAL (Cabuyo, La Luisa, La Leonera y Gloria, 2026-10-19): la de salida no abre o
+ * cierra, sino que reporta su % de apertura y recibe una consigna de 0 a 100 %. Convención de mapping:
+ *   - `valve<N>Position` en `realIn`, `unit: "%"`, `min: 0`, `max: 100`, con `label` y `flowDomainKey`.
+ *   - Mientras no exista la fase de consigna NO se declara `valve<N>`: la válvula se ve, pero no se
+ *     manda (`commandable: false`, puerta `setpoint-pending`).
+ *   - Numeración de La Vorágine: `valve1` = salida (proporcional), `valve2` = entrada (on/off).
+ * Su estado sale de la APERTURA (`POSITION_CLOSED_THRESHOLD_PCT`), que es el dato físico más directo y
+ * por eso manda sobre los otros dos: posición > palabra de estado > caudal. El caudal la corrobora
+ * igual que en las on/off, y si discrepan también se marca `disagreement`.
  */
 
 /** Umbral de caudal por debajo del cual se considera la válvula cerrada (método 2). */
 export const FLOW_CLOSED_THRESHOLD = 0.1;
+
+/**
+ * Apertura (en %) hasta la cual una válvula PROPORCIONAL se da por CERRADA. Mismo patrón que
+ * `FLOW_CLOSED_THRESHOLD`: `<=` umbral → cerrada; por encima → abierta.
+ *
+ * 2 y no 0: la apertura llega de un transmisor de posición analógico, y su error de cero es del orden
+ * de un punto del recorrido. Con 0, una válvula cerrada que reporta 0,6 % se pintaría ABIERTA.
+ * Y no más de 2: por encima ya puede pasar agua de verdad, y decir «cerrada» con caudal es el error
+ * caro. Es una cifra PROVISIONAL, sin dato de campo (la escala real la entrega el integrador en la
+ * ficha de las plantas nuevas): si no encaja, el cruce con el caudal lo delata como `disagreement`
+ * en vez de esconderlo.
+ */
+export const POSITION_CLOSED_THRESHOLD_PCT = 2;
 
 /** Bits de la palabra de estado (intIn[0]) según la interpretación de válvulas del PLC. */
 const BIT_VALID = 1 << 14; // 16384 — el PLC reporta un estado válido
 const BIT_OPEN = 1 << 0; //     1 — abierta
 
 export type ValveState = 'open' | 'closed' | 'unknown';
-export type ValveStateSource = 'estado' | 'caudal' | 'ninguno';
+export type ValveStateSource = 'posicion' | 'estado' | 'caudal' | 'ninguno';
+/** `onoff` = abre o cierra; `proportional` = reporta su % de apertura (`valve<N>Position`). */
+export type ValveKind = 'onoff' | 'proportional';
 
 export interface ValveView {
-  id: string; // domainKey del comando, p. ej. 'valve1'
+  id: string; // `valve<N>`, también en una proporcional que aún no declara esa señal
   name: string;
-  /** Veredicto final (método 1 si está disponible; si no, método 2). */
+  kind: ValveKind;
+  /** % de apertura reportado (solo proporcionales; null si no hay dato usable). */
+  positionPct: number | null;
+  /** Veredicto final: apertura si es proporcional y hay dato; si no, método 1; si no, método 2. */
   state: ValveState;
   /** De dónde salió el veredicto. */
   source: ValveStateSource;
@@ -41,22 +69,25 @@ export interface ValveView {
   flowValue: number | null;
   flowUnit: string | null;
   flowLabel: string | null;
-  /** Los dos métodos dan resultados distintos → avisar, no elegir en silencio. */
+  /** La lectura del equipo (apertura o palabra de estado) y el caudal discrepan → avisar, no elegir
+   *  en silencio. */
   disagreement: boolean;
   /**
    * ¿Se puede accionar desde la app? `false` = la válvula existe y su estado se muestra, pero no
-   * tiene canal de comando en el mapping (la de ENTRADA de La Vorágine, cuya frecuencia de bits aún
-   * no conocemos). Sin esto se le ofrecía al operador un botón que, tras confirmar la maniobra en un
-   * diálogo, solo podía devolver un 404.
+   * tiene canal de comando en el mapping: una válvula ANCLA (`writable: false`, como fue la de
+   * ENTRADA de La Vorágine hasta que el integrador entregó su canal) o una proporcional que solo
+   * declara `valve<N>Position`. Sin esto se le ofrecía al operador un botón que, tras confirmar la
+   * maniobra en un diálogo, solo podía devolver un 404.
    */
   commandable: boolean;
   /**
    * Verbos que ESTA válvula acepta, según su mapping (`SignalDto.commands`).
    *
    * No es lo mismo que `commandable`. Ese dice si hay canal de mando; esto dice QUÉ se puede
-   * mandar por él: hoy solo La Vorágine y La Sirena declaran `close`, así que en las otras ocho
-   * un "cerrar" sale al backend para volver con `UNKNOWN_COMMAND` después de que el operador
-   * confirmara la maniobra. Vacío = el mapping no declara ninguno (no debería ocurrir).
+   * mandar por él. En el mapping de producción (revisado el 2026-10-19) declaran `close` 9 de las
+   * 13 válvulas; en las de Montebello, Km 18, Alto de los Mangos y Pichindé un "cerrar" saldría al
+   * backend para volver con `UNKNOWN_COMMAND` después de que el operador confirmara la maniobra.
+   * Vacío = el mapping no declara ninguno (una proporcional sin `valve<N>`, o un error de mapping).
    */
   commands: string[];
   /** Valor crudo de la palabra de estado (diagnóstico). */
@@ -112,6 +143,12 @@ function stateFromFlow(flow: number | null): ValveState | null {
   return flow <= FLOW_CLOSED_THRESHOLD ? 'closed' : 'open';
 }
 
+/** Proporcionales: apertura <= `POSITION_CLOSED_THRESHOLD_PCT` → cerrada; por encima → abierta. */
+function stateFromPosition(pct: number | null): ValveState | null {
+  if (pct === null) return null;
+  return pct <= POSITION_CLOSED_THRESHOLD_PCT ? 'closed' : 'open';
+}
+
 /**
  * Caudal de referencia para el método 2. Se prefiere la SALIDA (lo que la válvula entrega) y, si la
  * planta no la tiene mapeada, se usa la entrada. Devuelve también su etiqueta para poder mostrar de
@@ -139,28 +176,38 @@ export function valvesFromSnapshot(snapshot: PlantSnapshotDto | undefined): Valv
   if (!snapshot) return [];
   const out: ValveView[] = [];
 
-  // Una válvula por cada señal de comando valve<N> presente en el mapping de la planta.
+  // Una válvula por cada número que aparezca como `valve<N>` (mando) o `valve<N>Position` (apertura
+  // de una proporcional). Solo con `valve<N>` se perdía la proporcional, que hoy no declara mando.
   const nums = new Set<number>();
   for (const key of Object.keys(snapshot.signals)) {
-    const m = /^valve(\d+)$/.exec(key);
+    const m = /^valve(\d+)(Position)?$/.exec(key);
     if (m) nums.add(Number(m[1]));
   }
 
   for (const n of [...nums].sort((a, b) => a - b)) {
     const cmd = snapshot.signals[`valve${n}`];
+    const posSig = snapshot.signals[`valve${n}Position`];
+    const kind: ValveKind = posSig ? 'proportional' : 'onoff';
     // El caudal se resuelve POR VÁLVULA: cada una puede estar en un punto distinto del proceso.
-    const flow = referenceFlow(snapshot.signals, cmd?.flowDomainKey);
+    const flow = referenceFlow(snapshot.signals, cmd?.flowDomainKey ?? posSig?.flowDomainKey);
     const stateSig = snapshot.signals[`valve${n}State`];
     const rawState = numeric(stateSig);
     const byState = stateFromWord(rawState, stateSig?.stateEncoding, stateSig?.stateTrusted);
+    const positionPct = numeric(posSig);
+    const byPosition = stateFromPosition(positionPct);
     const byFlow = stateFromFlow(flow.value);
+    // Lo que dice el propio equipo: la apertura si la hay; si no, la palabra de estado.
+    const delEquipo = byPosition ?? byState;
 
-    const state: ValveState = byState ?? byFlow ?? 'unknown';
-    const source: ValveStateSource = byState !== null ? 'estado' : byFlow !== null ? 'caudal' : 'ninguno';
+    const state: ValveState = delEquipo ?? byFlow ?? 'unknown';
+    const source: ValveStateSource =
+      byPosition !== null ? 'posicion' : byState !== null ? 'estado' : byFlow !== null ? 'caudal' : 'ninguno';
 
     out.push({
       id: `valve${n}`,
-      name: cmd?.label ?? `Válvula ${n}`,
+      name: cmd?.label ?? posSig?.label ?? `Válvula ${n}`,
+      kind,
+      positionPct,
       state,
       source,
       byState,
@@ -168,16 +215,32 @@ export function valvesFromSnapshot(snapshot: PlantSnapshotDto | undefined): Valv
       flowValue: flow.value,
       flowUnit: flow.unit,
       flowLabel: flow.label,
-      disagreement: byState !== null && byFlow !== null && byState !== byFlow,
-      // Ausente ⇒ accionable: el backend solo manda el campo cuando vale false, y así una válvula
-      // de las de siempre se comporta igual que antes de que este campo existiera.
-      commandable: cmd?.commandable !== false,
+      disagreement: delEquipo !== null && byFlow !== null && delEquipo !== byFlow,
+      // Sin `valve<N>` no hay por dónde mandar: una proporcional que solo declara su apertura NO es
+      // accionable. Con `valve<N>`, ausente ⇒ accionable: el backend solo manda el campo cuando vale
+      // false, y así una válvula de las de siempre se comporta igual que antes de que existiera.
+      commandable: cmd !== undefined && cmd.commandable !== false,
       commands: cmd?.commands ?? [],
       rawState,
-      ts: stateSig?.ts ?? cmd?.ts ?? null,
+      ts: posSig?.ts ?? stateSig?.ts ?? cmd?.ts ?? null,
     });
   }
   return out;
+}
+
+/** Texto de la apertura, p. ej. «Apertura 47 %». Un decimal por debajo de 10 %: cerca del umbral,
+ *  redondear 2,4 a «2 %» junto a un badge «Abierta» parecería una contradicción. */
+export function textoApertura(pct: number | null): string {
+  if (pct === null) return 'Apertura sin dato';
+  const decimales = Math.abs(pct) < 10 ? 1 : 0;
+  return `Apertura ${pct.toLocaleString('es-CO', { maximumFractionDigits: decimales })} %`;
+}
+
+/** Ancho de la barra de apertura, acotado a [0, 100]: la barra no tiene dónde crecer. El número
+ *  fuera de rango se sigue mostrando tal cual en el texto. */
+export function anchoBarraApertura(pct: number | null): number {
+  if (pct === null) return 0;
+  return Math.min(100, Math.max(0, pct));
 }
 
 /**
@@ -192,22 +255,39 @@ export function valvesFromSnapshot(snapshot: PlantSnapshotDto | undefined): Valv
  *
  *  1. `frozen` — la planta no reporta. El interlock del backend rechazaría la orden de todas
  *     formas (`snapshot frozen`), así que ofrecerla es prometer algo que no va a pasar.
- *  2. Sin canal de mando (`commandable:false`) — la válvula existe y se muestra, pero su mapping
- *     no tiene por dónde escribir. Es la de ENTRADA de La Vorágine.
- *  3. Estado desconocido — no se sabe si está abierta o cerrada, así que no se sabe hacia dónde
+ *  2. `setpoint-pending` — válvula PROPORCIONAL. No se abre ni se cierra: se le manda una consigna
+ *     de 0 a 100 %, y esa fase todavía no existe (ni en el comando, ni en el backend, ni en la app).
+ *     Va antes que el canal porque es el motivo de fondo: aunque algún día declare `valve<N>`, un
+ *     «abrir/cerrar» no es la orden que entiende.
+ *  3. Sin canal de mando (`commandable:false`) — la válvula existe y se muestra, pero su mapping
+ *     no tiene por dónde escribir: una válvula ANCLA, como fue la de ENTRADA de La Vorágine hasta
+ *     que el integrador entregó su canal.
+ *  4. Estado desconocido — no se sabe si está abierta o cerrada, así que no se sabe hacia dónde
  *     moverla. Accionar a ciegas un actuador es peor que no ofrecerlo; y en la práctica este caso
  *     casi siempre coincide con el 1, porque el estado se deduce del caudal y un caudal inusable
  *     es justo lo que deja la planta congelada.
- *  4. El verbo que TOCA no está declarado — el caso de las ocho plantas sin `close`. Antes esto
- *     llegaba al backend y volvía `UNKNOWN_COMMAND` DESPUÉS de que el operador confirmara.
+ *  5. El verbo que TOCA no está declarado — el caso de las válvulas sin `close` (hoy Montebello,
+ *     Km 18, Alto de los Mangos y Pichindé). Antes esto llegaba al backend y volvía
+ *     `UNKNOWN_COMMAND` DESPUÉS de que el operador confirmara.
  */
 export type ValveAction =
   | { kind: 'command'; verb: 'open' | 'close' }
-  | { kind: 'blocked'; reason: 'frozen' | 'no-channel' | 'unknown-state' | 'verb-missing'; explain: string };
+  | {
+      kind: 'blocked';
+      reason: 'frozen' | 'setpoint-pending' | 'no-channel' | 'unknown-state' | 'verb-missing';
+      explain: string;
+    };
 
 export function accionDisponible(valve: ValveView, frozen: boolean): ValveAction {
   if (frozen) {
     return { kind: 'blocked', reason: 'frozen', explain: 'La planta no está reportando: no se puede accionar sin lecturas recientes.' };
+  }
+  if (valve.kind === 'proportional') {
+    return {
+      kind: 'blocked',
+      reason: 'setpoint-pending',
+      explain: 'La consigna de apertura (0–100 %) todavía no se puede enviar desde la app; solo se muestra la apertura.',
+    };
   }
   if (!valve.commandable) {
     return { kind: 'blocked', reason: 'no-channel', explain: 'Esta válvula no tiene canal de mando configurado; solo se muestra su estado.' };
@@ -232,9 +312,10 @@ export function accionDisponible(valve: ValveView, frozen: boolean): ValveAction
   return { kind: 'command', verb: verbo };
 }
 
-/** true si el domainKey lo consume la pantalla de válvulas (para no duplicarlo en el tablero). */
+/** true si el domainKey lo consume la pantalla de válvulas (para no duplicarlo en el tablero). La
+ *  apertura de una proporcional también: si no, salía repetida como tarjeta de «Proceso». */
 export function isValveSignal(domainKey: string): boolean {
-  return /^valve\d+(State)?$/.test(domainKey);
+  return /^valve\d+(State|Position)?$/.test(domainKey);
 }
 
 // ── Interpretación del resultado de un comando ────────────────────────────────────────────────
@@ -400,6 +481,19 @@ export function interpretCommand(r: ValveCommandResult, verb: 'open' | 'close', 
 // ── Detección de operación MANUAL ─────────────────────────────────────────────────────────────
 
 export type ManualEvent = 'opened' | 'closed' | null;
+
+/**
+ * ¿Se busca operación MANUAL en esta válvula? Solo en las on/off.
+ *
+ * En una proporcional la apertura sale de la posición del propio actuador: si alguien la mueve a
+ * mano, la apertura lo refleja, así que no hay un cambio «que el PLC no reportó». Y su caudal puede
+ * cruzar el umbral sin que nadie la toque (se corta el agua aguas arriba con la válvula al 30 %):
+ * aplicarle la regla de las on/off pintaría «operada manualmente» y un estado que contradice la
+ * apertura mostrada al lado. Si la apertura y el caudal no cuadran, eso ya lo dice `disagreement`.
+ */
+export function vigilaOperacionManual(valve: Pick<ValveView, 'kind'>): boolean {
+  return valve.kind === 'onoff';
+}
 
 /**
  * ¿La válvula se operó A MANO? La pista es física: el estado según el CAUDAL cambió (cruzó el umbral

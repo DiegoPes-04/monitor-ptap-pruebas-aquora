@@ -2,10 +2,11 @@ import { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { classifyBridge, CONNECTION_CODES } from '@ptap/shared';
+import { CONNECTION_CODES } from '@ptap/shared';
 import Colors from '../constants/colors';
 import { useAuth } from '../context/AuthContext';
 import { useClientNetworkStatus } from '../hooks/useClientNetworkStatus';
+import { plcFaultForBanner } from '../services/plant-status';
 
 type Tone = 'danger' | 'warning' | 'neutral';
 
@@ -23,13 +24,18 @@ type Tone = 'danger' | 'warning' | 'neutral';
  *  - PLC-02 (`Stale`): hubo sesión y el maestro dejó de enviar. Lo ven todos.
  *  - PLC-01 (resto): el servidor no alcanza al PLC. SOLO el admin (`system_config`) lo ve para
  *    escalarlo; un operador no ve banner (ya tiene la última lectura con su hora en las tarjetas).
+ *  - Planta en integración (`integrationPending`): ningún PLC-0x. Aún no está conectada al maestro,
+ *    así que el estado del puente no habla de ella (ver `plcFaultForBanner`). La pantalla ya explica
+ *    en su contenido que está en integración.
  */
 function ConnectionBannerBase({
   apiReachable,
   bridgeStatus,
+  integrationPending = false,
 }: {
   apiReachable: boolean;
   bridgeStatus: string | undefined;
+  integrationPending?: boolean;
 }) {
   const { hasPermission } = useAuth();
   // Solo diagnostica la red del dispositivo cuando de verdad no se llega al servidor.
@@ -80,11 +86,10 @@ function ConnectionBannerBase({
     }
   }
 
-  // apiReachable pero sin bridgeStatus aún: nada que clasificar todavía.
-  if (!bridgeStatus) return null;
-
-  const fault = classifyBridge(bridgeStatus);
-  if (fault === 'ok') return null;
+  // apiReachable: sin bridgeStatus aún, con el puente sano o en una planta en integración, no hay
+  // corte del PLC que anunciar.
+  const fault = plcFaultForBanner(bridgeStatus, integrationPending);
+  if (!fault) return null;
 
   if (fault === 'master_no_data') {
     return (
@@ -119,7 +124,7 @@ function ConnectionBannerBase({
   );
 }
 
-/** Props primitivas: el `memo` de fábrica basta. */
+/** Props primitivas (incluida `integrationPending`): el `memo` de fábrica basta. */
 export const ConnectionBanner = memo(ConnectionBannerBase);
 
 const TONE_COLOR: Record<Tone, string> = {

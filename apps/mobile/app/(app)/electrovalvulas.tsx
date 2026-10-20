@@ -16,6 +16,7 @@ import { OfflineNotice } from '../../components/OfflineNotice';
 import { valvesFromSnapshot, accionDisponible, type CommandVerdict } from '../../services/valves';
 import { useValveSupervisor, type SupervisedValve } from '../../hooks/useValveSupervisor';
 import { useDashboardPrefs } from '../../services/dashboard-prefs';
+import { EN_INTEGRACION } from '../../services/plant-status';
 import Colors from '../../constants/colors';
 
 /**
@@ -49,6 +50,8 @@ export default function ElectrovalvulasScreen() {
   const [resultado, setResultado] = useState<(CommandVerdict & { valveName: string }) | null>(null);
   const livenessState = snapshot?.liveness.state ?? 'frozen';
   const frozen = livenessState === 'frozen';
+  // Aún no conectada al PLC maestro: su `frozen` no es una caída (ver services/plant-status.ts).
+  const integrationPending = snapshot?.integrationPending === true;
   const apiReachable = !isError || (!!snapshot && !snapshot.pending);
   const showError = isError && !snapshot;
   const plantName = snapshot?.displayName ?? selectedPlant.name;
@@ -111,7 +114,11 @@ export default function ElectrovalvulasScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <PlantSelector />
-      <ConnectionBanner apiReachable={apiReachable} bridgeStatus={snapshot?.bridgeStatus} />
+      <ConnectionBanner
+        apiReachable={apiReachable}
+        bridgeStatus={snapshot?.bridgeStatus}
+        integrationPending={integrationPending}
+      />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -152,12 +159,21 @@ export default function ElectrovalvulasScreen() {
             onRetry={() => void refetch()}
             retryLabel="Reintentar la carga de las electroválvulas"
           />
+        ) : valves.length === 0 && integrationPending ? (
+          // No es «sin válvulas mapeadas» a secas: las tiene en campo, pero la planta aún no está
+          // conectada al PLC maestro, y decirlo así evita que alguien lo reporte como una falla.
+          <View style={styles.loadingWrap}>
+            <Ionicons name="construct-outline" size={34} color={Colors.textSecondary} />
+            <Text style={styles.loadingText}>{EN_INTEGRACION.titulo}</Text>
+            <Text style={styles.loadingSub}>{EN_INTEGRACION.valvulas}</Text>
+          </View>
         ) : valves.length === 0 ? (
           <View style={styles.loadingWrap}>
             <Ionicons name="git-branch-outline" size={34} color={Colors.textSecondary} />
             <Text style={styles.loadingText}>Esta planta no tiene electroválvulas mapeadas.</Text>
             <Text style={styles.loadingSub}>
-              Solo los sitios con buffers de comando (INT_OUT/INT_IN) exponen válvulas. Los tanques
+              Solo aparecen las válvulas declaradas en el mapping de la planta: las de mando
+              (INT_OUT/INT_IN) y las proporcionales que reportan su apertura. Los tanques
               retransmitidos por otra planta no tienen canal propio.
             </Text>
           </View>
@@ -194,7 +210,7 @@ export default function ElectrovalvulasScreen() {
 
       <ValveResultDialog verdict={resultado} onClose={() => setResultado(null)} />
 
-      <LiveBadge state={livenessState} loading={isLoading && !snapshot} />
+      <LiveBadge state={livenessState} loading={isLoading && !snapshot} integrationPending={integrationPending} />
     </SafeAreaView>
   );
 }

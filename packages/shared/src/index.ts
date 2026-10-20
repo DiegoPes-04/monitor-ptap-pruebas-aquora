@@ -260,6 +260,21 @@ export interface PlantSnapshotDto {
    * preferible no enseñar nada a enseñar un número viejo.
    */
   autonomy?: TankAutonomyDto[];
+  /**
+   * `true` = la planta está dada de alta en el mapping, pero el mapping no le declara NINGÚN buffer
+   * de datos: existe y todavía no está conectada al PLC maestro (Cabuyo, La Luisa, La Leonera y
+   * Gloria desde el 2026-10-19). Desaparece solo, sin tocar la app, en cuanto se le declaren buffers.
+   *
+   * Existe porque `liveness: frozen` no distingue los dos casos: la app pintaba «CONGELADO · SIN
+   * CONEXIÓN» en rojo, y la vista Civil «Reintentando automáticamente», para una planta que nunca se
+   * ha conectado. Quien lo leía entendía una CAÍDA. La liveness sigue en `frozen`, que es la verdad
+   * del dato; este campo dice POR QUÉ.
+   *
+   * Solo se emite cuando es true, como `commandable`: ausente = planta conectada, que es el caso de
+   * las doce de siempre, y un front antiguo que lo ignore se comporta como antes. Es estático: sale
+   * del mapping y no cambia sin reiniciar el backend.
+   */
+  integrationPending?: true;
 }
 
 /**
@@ -435,6 +450,11 @@ export interface PlantBasicStatusDto {
   liveness: LivenessDto;
   /** null = la planta no tiene señales de tanque mapeadas (no se puede afirmar ni negar). */
   waterAvailable: boolean | null;
+  /**
+   * Mismo campo y misma regla que `PlantSnapshotDto.integrationPending`. El Civil puede verlo: no es
+   * una lectura de la planta, es la razón por la que no hay ninguna.
+   */
+  integrationPending?: true;
 }
 
 /** Elemento de GET /api/plants. */
@@ -443,6 +463,8 @@ export interface PlantListItem {
   displayName: string;
   liveness: LivenessDto;
   bridgeStatus: BridgeStatus;
+  /** Mismo campo y misma regla que `PlantSnapshotDto.integrationPending`. */
+  integrationPending?: true;
 }
 
 export interface Sensor {

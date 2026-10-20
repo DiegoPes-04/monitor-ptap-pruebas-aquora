@@ -49,5 +49,8 @@ export function toBasicStatus(snapshot: PlantSnapshotDto): PlantBasicStatusDto {
     bridgeStatus: snapshot.bridgeStatus,
     liveness: snapshot.liveness,
     waterAvailable: waterAvailability(snapshot),
+    // Entra en la whitelist a propósito: no es una lectura, es la razón de que no haya ninguna. Sin
+    // él, el Civil leía «Sin conexión… Reintentando» en una planta que aún no se ha conectado nunca.
+    ...(snapshot.integrationPending ? { integrationPending: true as const } : {}),
   };
 }

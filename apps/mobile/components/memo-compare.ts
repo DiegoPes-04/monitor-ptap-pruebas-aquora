@@ -89,6 +89,11 @@ export function sameValveItem(a: ValveItemProps, b: ValveItemProps): boolean {
     x.name === y.name &&
     x.effectiveState === y.effectiveState &&
     x.manualOverride === y.manualOverride &&
+    // Proporcionales: el tipo decide si se pinta la apertura y la puerta `setpoint-pending`, y la
+    // apertura se mueve sin que cambie el estado (30 % → 60 % sigue «Abierta»): sin compararla, el
+    // número y la barra se quedarían congelados en la primera lectura.
+    x.kind === y.kind &&
+    x.positionPct === y.positionPct &&
     // Los verbos deciden si se dibuja el control y cuál: si cambian (recarga del mapping) la
     // tarjeta TIENE que repintarse. Se compara la lista elemento a elemento porque
     // `valvesFromSnapshot` construye un array nuevo en cada snapshot y la identidad nunca coincide.

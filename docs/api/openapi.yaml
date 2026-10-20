@@ -10,7 +10,8 @@ info:
   title: Monitor PTAP API
   version: 1.0.0
   description: >
-    Backend NestJS del monorepo monitor-ptap: gateway OPC UA de 12 PTAP.
+    Backend NestJS del monorepo monitor-ptap: gateway OPC UA de 16 PTAP (12 en operación; cabuyo,
+    luisa, leonera y gloria en integración, todavía sin señales).
     Prefijo global /api (excepto /metrics, fuera del prefijo por convención de Prometheus).
     Puerto 4000 (variable PORT).
 
@@ -313,7 +314,10 @@ paths:
         En main.telemetry.ts va sin auth.
       responses:
         '200':
-          description: Plantas conocidas por el mapping
+          description: >
+            Plantas conocidas por el mapping (16). Las 4 en integración (cabuyo, luisa, leonera,
+            gloria) no tienen buffers, así que su liveness es siempre frozen, y llevan
+            `integrationPending: true` para que no se lea como una caída.
           content:
             application/json:
               schema:
@@ -328,6 +332,7 @@ paths:
                         displayName: { type: string, example: Montebello }
                         liveness: { $ref: '#/components/schemas/Liveness' }
                         bridgeStatus: { $ref: '#/components/schemas/BridgeStatus' }
+                        integrationPending: { $ref: '#/components/schemas/IntegrationPending' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
   /api/plants/{plantId}/status:
@@ -751,7 +756,7 @@ components:
       description: >
         Dos causas posibles: (a) el rol no tiene el permiso requerido por la ruta, o (b) la
         planta pedida NO es la vinculada a la cuenta (user.plant) y el usuario no tiene
-        `view_all_plants` — cada cuenta ve solo su planta; únicamente el Admin supervisa las 12.
+        `view_all_plants` — cada cuenta ve solo su planta; únicamente el Admin supervisa las 16.
     AuthResult:
       description: Token JWT + usuario
       content:
@@ -848,6 +853,18 @@ components:
           type: object
           additionalProperties: { $ref: '#/components/schemas/Signal' }
         pending: { type: boolean, description: true si aún no hay snapshot en cache para esa planta }
+        integrationPending: { $ref: '#/components/schemas/IntegrationPending' }
+
+    IntegrationPending:
+      type: boolean
+      enum: [true]
+      description: >
+        Solo presente (y siempre `true`) cuando el mapping no declara ningún buffer de datos para la
+        planta: está dada de alta pero todavía no está conectada al PLC maestro. Su liveness es
+        frozen por eso, no por una caída, y la app la muestra "EN INTEGRACIÓN". Ausente = planta
+        conectada. Es estático: desaparece solo cuando se le declaran buffers (tras reiniciar el
+        backend). Viaja en el snapshot (REST, respuesta de espera y Socket.IO), en GET /api/plants y
+        en el estado básico.
 
     PlantBasicStatus:
       type: object
@@ -863,6 +880,7 @@ components:
           type: boolean
           nullable: true
           description: null = sin señales de tanque mapeadas (no se afirma ni se niega).
+        integrationPending: { $ref: '#/components/schemas/IntegrationPending' }
 
     ConnectionEvent:
       type: object

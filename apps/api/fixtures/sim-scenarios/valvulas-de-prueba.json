@@ -1,6 +1,6 @@
 {
   "name": "valvulas-de-prueba",
-  "description": "Escenario por defecto de `npm run dev:sim`. Mapping de PRUEBA con 1 válvula (sim-una), 2 y 3 válvulas en la MISMA palabra INT_OUT (sim-dos, sim-tres: bits 0/1, 2/3, 4/5) y válvulas en buffers distintos y bitOut (sim-buffers). Tiempos realistas: MSG maestro→local de 8 s (medido en La Sirena), recorrido supuesto de 30 s, el PLC local solo mueve mientras el bit está sostenido (hold). Con el sostenido de 45 s del mapping, el PLC local ve el bit entre ~37 y ~53 s.",
+  "description": "Escenario por defecto de `npm run dev:sim`. Mapping de PRUEBA con 1 válvula (sim-una), 2 y 3 válvulas en la MISMA palabra INT_OUT (sim-dos, sim-tres: bits 0/1, 2/3, 4/5) y válvulas en buffers distintos y bitOut (sim-buffers), más una válvula PROPORCIONAL de solo lectura (sim-proporcional: valve1Position en realIn, 0-100 %, que el simulador mueve entre 10 y 90).Tiempos realistas: MSG maestro→local de 8 s (medido en La Sirena), recorrido supuesto de 30 s, el PLC local solo mueve mientras el bit está sostenido (hold). Con el sostenido de 45 s del mapping, el PLC local ve el bit entre ~37 y ~53 s.",
   "mapping": "mappings/valvulas-de-prueba.json",
   "ioLatencyMs": 50,
   "defaults": {

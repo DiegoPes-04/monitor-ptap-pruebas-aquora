@@ -14,6 +14,8 @@ export interface SnapshotInput {
   liveness: LivenessDto;
   extracted: ExtractedSignal[];
   deadLetter: DeadLetterBuffer;
+  /** La planta no tiene ningún buffer en el mapping (ver `PlantSnapshotDto.integrationPending`). */
+  integrationPending?: boolean;
 }
 
 /**
@@ -68,7 +70,7 @@ export function buildSnapshot(input: SnapshotInput): PlantSnapshotDto {
     signals[ex.domainKey] = dto;
   }
 
-  return {
+  const snapshot: PlantSnapshotDto = {
     plantId: input.plantId,
     displayName: input.displayName,
     sequence: input.sequence,
@@ -78,4 +80,8 @@ export function buildSnapshot(input: SnapshotInput): PlantSnapshotDto {
     liveness: input.liveness,
     signals,
   };
+  // Solo cuando es true, por lo mismo que `commandable`: viaja en cada emisión, y en las doce plantas
+  // conectadas sería un `false` repetido sin significado. Ausente = planta conectada.
+  if (input.integrationPending) snapshot.integrationPending = true;
+  return snapshot;
 }

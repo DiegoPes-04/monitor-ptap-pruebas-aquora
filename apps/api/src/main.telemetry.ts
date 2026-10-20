@@ -46,6 +46,7 @@ class TelemetryPlantsController {
       liveness: known.liveness,
       signals: {},
       pending: true,
+      ...(known.integrationPending ? { integrationPending: true as const } : {}),
     };
   }
 }

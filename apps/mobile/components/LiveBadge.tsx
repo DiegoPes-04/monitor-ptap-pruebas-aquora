@@ -2,12 +2,7 @@ import { memo } from 'react';
 import { View, Text } from 'react-native';
 import Colors from '../constants/colors';
 import type { LivenessState } from '../services/api';
-
-const LIVENESS: Record<LivenessState, { color: string; label: string }> = {
-  live: { color: Colors.success, label: 'EN VIVO' },
-  stable: { color: Colors.primaryLight, label: 'ESTABLE' },
-  frozen: { color: Colors.danger, label: 'CONGELADO · SIN CONEXIÓN' },
-};
+import { livenessBadge } from '../services/plant-status';
 
 /**
  * Badge de frescura REAL (ya no cosmético). Tres estados y solo UNO es una alarma:
@@ -15,11 +10,21 @@ const LIVENESS: Record<LivenessState, { color: string; label: string }> = {
  *   azul   ESTABLE   → la sesión está sana y el proceso quieto. Normal, NO es un fallo:
  *                      un tanque a nivel constante se ve así durante horas.
  *   rojo   CONGELADO → perdimos la conexión con el PLC; lo que se muestre ya no es fiable.
+ * Y dos neutros (gris), que no son alarmas:
+ *   CONECTANDO…      → carga inicial, aún sin dato: no se alarma con el rojo antes de tiempo.
+ *   EN INTEGRACIÓN   → la planta aún no está conectada al PLC maestro (`integrationPending`): su
+ *                      `frozen` no es una caída. Ver `services/plant-status.ts`.
  */
-function LiveBadgeBase({ state, loading = false }: { state: LivenessState; loading?: boolean }) {
-  // Durante la carga inicial (aún sin dato) NO alarmar con el rojo "CONGELADO · SIN CONEXIÓN":
-  // se muestra un estado neutro "CONECTANDO…" hasta que llegue el primer snapshot.
-  const { color, label } = loading ? { color: Colors.neutral, label: 'CONECTANDO…' } : LIVENESS[state];
+function LiveBadgeBase({
+  state,
+  loading = false,
+  integrationPending = false,
+}: {
+  state: LivenessState;
+  loading?: boolean;
+  integrationPending?: boolean;
+}) {
+  const { color, label } = livenessBadge(state, { loading, integrationPending });
   return (
     <View
       // El paso a CONGELADO es información crítica que hoy solo se veía. `polite` hace que un
@@ -45,5 +50,5 @@ function LiveBadgeBase({ state, loading = false }: { state: LivenessState; loadi
   );
 }
 
-/** Props primitivas: el `memo` de fábrica basta. */
+/** Props primitivas (incluida `integrationPending`): el `memo` de fábrica basta. */
 export const LiveBadge = memo(LiveBadgeBase);

@@ -8,7 +8,6 @@ import { RequirePermission } from '../auth/decorators/require-permission.decorat
 import { PlantCache } from '../../infrastructure/connectivity/pipeline/plant-cache';
 import { PlantPipelineService } from '../../infrastructure/connectivity/pipeline/plant-pipeline.service';
 import { toBasicStatus, type PlantBasicStatusDto } from '../../infrastructure/connectivity/pipeline/plant-basic-status.dto';
-import type { BridgeStatus } from '../../infrastructure/connectivity/ports/connectivity-adapter.port';
 import { ZodValidationPipe } from '../../infrastructure/validation/zod-validation.pipe';
 import { plantIdParamSchema } from '../../infrastructure/validation/plant-id.schema';
 
@@ -70,11 +69,10 @@ export class PlantsController {
     return {
       plantId: known.plantId,
       displayName: known.displayName,
-      // listPlants() ensancha el tipo a `string`, pero el valor viene de
-      // adapter.getBridgeStatus(), que es BridgeStatus por construcción.
-      bridgeStatus: known.bridgeStatus as BridgeStatus,
+      bridgeStatus: known.bridgeStatus,
       liveness: known.liveness,
       waterAvailable: null,
+      ...(known.integrationPending ? { integrationPending: true as const } : {}),
     };
   }
 
@@ -97,6 +95,9 @@ export class PlantsController {
       liveness: known.liveness,
       signals: {},
       pending: true,
+      // La respuesta de espera también lo lleva: sin él, la app diría «sin conexión» de una planta en
+      // integración durante el arranque, antes del primer snapshot.
+      ...(known.integrationPending ? { integrationPending: true as const } : {}),
     };
   }
 }

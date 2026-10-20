@@ -54,6 +54,7 @@
     "Validez de presiones: [-15, 232] psi. El min NO es 0: los transmisores manométricos derivan bajo cero (Campoalegre salida 1 leyó -0.74 psi real el 2026-07-15) y el vacío físico llega a ≈ -14.7 psi. Bajo -15 psi es imposible físico ⇒ OUT_OF_RANGE (sensor/escala dañados; p. ej. Carbonero salida -57 psi). PENDIENTE verificar contra HMI: Cascajal presión de entrada lee 384 psi (¿unidad/índice/escala?).",
     "opMin/opMax = rango OPERATIVO/normativo entregado por el operador (insumo de alarmas futuras). NO confundir con min/max, que son límites de validez física: una lectura fuera de [opMin,opMax] pero dentro de [min,max] es un dato REAL y usable (p. ej. pH de salida 5.8 o tanque en 0.5 m) que la UI debe mostrar, no descartar.",
     "Topología de san-antonio y quijote verificada por browse: son sitios mínimos reales (solo un buffer de tanque + MSG_READ). topologyVerified: true.",
+    "PLANTAS EN INTEGRACIÓN (alta 2026-10-19): cabuyo (Cabuyo), luisa (La Luisa), leonera (La Leonera) y gloria (Gloria) están dadas de alta SIN señales, a la espera de que el integrador las suba al PLC maestro. El browse del 2026-07-12 no trae ningún tag suyo: sin buffer, NodeId ni índice no hay nada que mapear y no se inventa nada (opcBuffers: {}, connection unmapped con DN/ER/TO en null, signals: []). Equipo declarado por el cliente en las cuatro: válvula de entrada on/off, válvula de salida proporcional (% de apertura + consigna 0–100 %), caudal de entrada, caudal de salida y presión de entrada; solo La Leonera tiene además 1 tanque con sensor de nivel, con datos aún desconocidos. Lo que el integrador debe entregar por planta y los pasos para conectarlas: docs/plc/PLANTAS_NUEVAS_CABUYO_LUISA_LEONERA_GLORIA.md.",
     "displayName es provisional (displayNameProvisional: true) hasta confirmación escrita de la planta.",
     "generatedFrom.namespaces es referencia histórica de la captura, NO fuente de verdad para el runtime."
   ],
@@ -2855,6 +2856,62 @@
         },
         "mappingStatus": "mapped",
         "confidence": "confirmed"
+      },
+      "signals": []
+    },
+    {
+      "plantId": "cabuyo",
+      "displayName": "Cabuyo",
+      "displayNameProvisional": true,
+      "opcBuffers": {},
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "estimated"
+      },
+      "signals": []
+    },
+    {
+      "plantId": "luisa",
+      "displayName": "La Luisa",
+      "displayNameProvisional": true,
+      "opcBuffers": {},
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "estimated"
+      },
+      "signals": []
+    },
+    {
+      "plantId": "leonera",
+      "displayName": "La Leonera",
+      "displayNameProvisional": true,
+      "opcBuffers": {},
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "estimated"
+      },
+      "signals": []
+    },
+    {
+      "plantId": "gloria",
+      "displayName": "Gloria",
+      "displayNameProvisional": true,
+      "opcBuffers": {},
+      "connection": {
+        "done": null,
+        "error": null,
+        "timeout": null,
+        "mappingStatus": "unmapped",
+        "confidence": "estimated"
       },
       "signals": []
     }

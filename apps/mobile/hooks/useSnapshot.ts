@@ -97,6 +97,9 @@ export function useSnapshot(plantId: string, enabled = true) {
     if (!enabled) return undefined;
     const fresh = query.data;
     if (fresh && Object.keys(fresh.signals).length > 0) return fresh;
+    // Planta en integración: no tiene señales porque aún no está conectada, no porque se haya caído.
+    // Mezclarla con un respaldo viejo le quitaría el `integrationPending` y la pintaría «CONGELADO».
+    if (fresh?.integrationPending) return fresh;
     const stored = getLastSnapshot(plantId);
     if (!stored) return fresh;
     return {

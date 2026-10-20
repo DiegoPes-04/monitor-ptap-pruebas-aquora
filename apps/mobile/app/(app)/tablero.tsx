@@ -22,6 +22,7 @@ import { tanksFromSnapshot } from '../../services/tanks';
 import { cardKindFor } from '../../services/signal-kind';
 import { dashboardSignals, groupSignals, summarize, type GroupId } from '../../services/signal-groups';
 import { setCompact, toggleGroup, useDashboardPrefs } from '../../services/dashboard-prefs';
+import { EN_INTEGRACION } from '../../services/plant-status';
 
 /** Icono por domainKey conocido (cosmético). */
 const ICONS: Record<string, string> = {
@@ -77,6 +78,8 @@ export default function TableroScreen() {
 
   const livenessState = snapshot?.liveness.state ?? 'frozen';
   const frozen = livenessState === 'frozen';
+  // Aún no conectada al PLC maestro: su `frozen` no es una caída (ver services/plant-status.ts).
+  const integrationPending = snapshot?.integrationPending === true;
   const groups = useMemo(() => groupSignals(signals, frozen), [signals, frozen]);
   // Derivado de los grupos, que ya contaron: recorrer otra vez las señales daría los mismos
   // números con el riesgo de que las dos cuentas se contradigan.
@@ -110,7 +113,11 @@ export default function TableroScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <PlantSelector />
-      <ConnectionBanner apiReachable={apiReachable} bridgeStatus={snapshot?.bridgeStatus} />
+      <ConnectionBanner
+        apiReachable={apiReachable}
+        bridgeStatus={snapshot?.bridgeStatus}
+        integrationPending={integrationPending}
+      />
 
       <ScrollView
         contentContainerStyle={styles.content}
@@ -165,11 +172,18 @@ export default function TableroScreen() {
             retryLabel="Reintentar la carga del tablero"
           />
         ) : !hasContent ? (
-          // Dos vacíos DISTINTOS: sin conexión y sin respaldo local aún (pending), o una planta
-          // que de verdad no tiene señales en el mapping. Antes ambos decían "no mapeada" y
-          // durante un corte eso desinformaba.
+          // Tres vacíos DISTINTOS: una planta en integración (aún no conectada al PLC maestro), sin
+          // conexión y sin respaldo local aún (pending), o una planta que de verdad no tiene señales
+          // en el mapping. Antes los dos últimos decían "no mapeada" y durante un corte eso
+          // desinformaba. La integración va primero: su respuesta de espera también es `pending`, y
+          // ahí «sin conexión con la planta» se leería como una caída.
           <View style={styles.info}>
-            {snapshot?.pending ? (
+            {integrationPending ? (
+              <>
+                <Text style={styles.infoText}>{EN_INTEGRACION.titulo}</Text>
+                <Text style={styles.infoSub}>{EN_INTEGRACION.lecturas}</Text>
+              </>
+            ) : snapshot?.pending ? (
               <>
                 <Text style={styles.infoText}>Sin datos del PLC por ahora (sin conexión con la planta).</Text>
                 <Text style={styles.infoSub}>Cuando lleguen lecturas, este dispositivo recordará las últimas y las mostrará aunque la conexión vuelva a caerse.</Text>
@@ -177,7 +191,7 @@ export default function TableroScreen() {
             ) : (
               <>
                 <Text style={styles.infoText}>Esta planta no tiene señales mapeadas todavía.</Text>
-                <Text style={styles.infoSub}>Sin export L5X, solo Montebello expone caudal.</Text>
+                <Text style={styles.infoSub}>Sus lecturas aparecerán aquí cuando sus señales estén conectadas al PLC maestro.</Text>
               </>
             )}
           </View>
@@ -246,7 +260,7 @@ export default function TableroScreen() {
         )}
       </ScrollView>
 
-      <LiveBadge state={livenessState} loading={isLoading && !snapshot} />
+      <LiveBadge state={livenessState} loading={isLoading && !snapshot} integrationPending={integrationPending} />
     </SafeAreaView>
   );
 }

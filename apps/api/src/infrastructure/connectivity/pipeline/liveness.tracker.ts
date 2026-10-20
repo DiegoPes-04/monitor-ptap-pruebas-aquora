@@ -7,6 +7,8 @@ interface PlantLiveness {
   windowSec: number;
   /** Cuándo empezamos a observar esta planta. Acota el "aún no vi ningún cambio" del arranque. */
   firstSeenAt: number;
+  /** El mapping no le declara NINGÚN buffer de datos: ningún adaptador le entregará un frame. */
+  sinBuffers: boolean;
 }
 
 /**
@@ -50,10 +52,22 @@ export class LivenessTracker {
     private readonly defaultWindowSec: number,
   ) {}
 
-  /** Registra el default por planta (del mapping) antes de recibir frames. */
-  configurePlant(plantId: string, windowSec: number | null): void {
+  /**
+   * Registra el default por planta (del mapping) antes de recibir frames.
+   *
+   * `tieneBuffers = false` es una planta dada de alta en el mapping SIN un solo buffer de datos:
+   * Cabuyo, La Luisa, La Leonera y Gloria desde el 2026-10-19, a la espera de que el integrador las
+   * suba al PLC maestro. El beneficio de la duda del arranque (`stable` durante la ventana) existe
+   * porque la primera muestra de cada buffer no cuenta como cambio; aquí no va a llegar ningún buffer,
+   * así que no hay duda que conceder. Concederla pintaba ESTABLE —y «Sistema operativo, enviando
+   * datos» en la vista Civil— durante los primeros `windowSec` de cada arranque una planta que no
+   * está en el PLC. Es `frozen` desde el principio: con tres estados, lo único cierto es que no llega
+   * nada. Si algún día llegara un frame suyo, manda la regla normal.
+   */
+  configurePlant(plantId: string, windowSec: number | null, tieneBuffers = true): void {
     const entry = this.ensure(plantId);
     entry.windowSec = windowSec ?? this.defaultWindowSec;
+    entry.sinBuffers = !tieneBuffers;
   }
 
   /** Procesa un frame y devuelve true si detectó un cambio real (para el diff aguas abajo). */
@@ -90,6 +104,10 @@ export class LivenessTracker {
     // último cambio, el dato que tenemos ya no está respaldado por nadie.
     if (!sourceHealthy) return 'frozen';
 
+    // Sin buffers de datos en el mapping y sin un solo frame recibido: no hay nada que esperar
+    // (ver `configurePlant`).
+    if (entry.sinBuffers && entry.lastKnown.size === 0) return 'frozen';
+
     // Conectados pero aún sin haber visto un solo cambio. Es el estado del arranque (la primera
     // muestra de cada buffer no cuenta como cambio: no hay delta contra el que comparar), así que
     // se concede el beneficio de la duda DURANTE la ventana. Pasada la ventana sin ver moverse
@@ -108,7 +126,7 @@ export class LivenessTracker {
   private ensure(plantId: string): PlantLiveness {
     let entry = this.plants.get(plantId);
     if (!entry) {
-      entry = { lastKnown: new Map(), lastChangeAt: null, windowSec: this.defaultWindowSec, firstSeenAt: Date.now() };
+      entry = { lastKnown: new Map(), lastChangeAt: null, windowSec: this.defaultWindowSec, firstSeenAt: Date.now(), sinBuffers: false };
       this.plants.set(plantId, entry);
     }
     return entry;
