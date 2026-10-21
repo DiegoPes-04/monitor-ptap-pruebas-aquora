@@ -25,7 +25,13 @@ import type { CommandMappingResolver } from '../src/modules/commands/command-map
 import { REJECT, FAIL, SENT, httpStatusForCommand, type CommandActor } from '../src/modules/commands/command.dto';
 import { WriteService } from '../src/modules/commands/write.service';
 import type { CommandSignatureService } from '../src/modules/commands/command-signature.service';
-import type { NotificationRepository } from '../src/modules/notifications/notification.repository';
+import { NotificationRepository } from '../src/modules/notifications/notification.repository';
+import type { DevicePushTokenRepository } from '../src/modules/notifications/device-push-token.repository';
+import type { NotificationPrefsRepository } from '../src/modules/notifications/notification-prefs.repository';
+import { PushDispatcher } from '../src/modules/notifications/push.dispatcher';
+import { NOTIFICATION_PREFS_DEFAULT } from '@ptap/shared';
+import type { TokenMessage } from 'firebase-admin/messaging';
+import type { Pool } from 'mysql2/promise';
 
 const WRITE: WriteSpec = {
   target: { channel: 'intOut', sourceBuffer: 'INT_OUT_TEST', index: 3 },
@@ -1022,6 +1028,72 @@ test('sostenida: el mapping REAL de La Vorágine — las palabras exactas que sa
     assert.equal(adapter.valor(PALABRA), esperado, `${target} ${command}`);
   }
   assert.deepEqual(adapter.escrituras.map((e) => e.value), pasos.map(([, , v]) => v), 'una escritura por orden, y ninguna de limpieza');
+});
+
+// ── El push no frena una orden de válvula ──
+//
+// La maniobra deja su aviso en la bandeja y `WriteService` ESPERA a `create()` antes de contestar al
+// mando. Desde que existe el push, ese aviso además se empuja por FCM: si el envío corriera dentro de
+// `create()`, un Google lento retrasaría la respuesta de una orden de válvula. Aquí la bandeja y el
+// PushDispatcher son los REALES, y lo único falso es un FCM que tarda 5 s en contestar.
+
+test('sostenida + push LENTO: la orden responde igual de rápido, y el aviso sale por push después', async () => {
+  const inserts: unknown[][] = [];
+  const pool = {
+    query: async (_sql: string, params: unknown[]) => {
+      inserts.push(params);
+      return [{ insertId: inserts.length, affectedRows: 1 }, undefined];
+    },
+  } as unknown as Pool;
+  const avisos = new NotificationRepository(pool);
+
+  const envios: TokenMessage[] = [];
+  const fcmLento = {
+    project: 'p',
+    send: (m: TokenMessage) => {
+      envios.push(m);
+      return new Promise<void>((resolve) => setTimeout(resolve, 5_000).unref());
+    },
+  };
+  const push = new PushDispatcher(
+    { destinatarios: async () => [{ userId: 'u-jefe', tokens: ['tok-jefe'] }] } as unknown as DevicePushTokenRepository,
+    { get: async () => NOTIFICATION_PREFS_DEFAULT } as unknown as NotificationPrefsRepository,
+    avisos,
+    { sender: fcmLento, windowMs: 0 },
+  );
+  await push.onModuleInit();
+  try {
+    const adapter = adaptadorPalabra({ inicial: { [PALABRA]: 8192 } });
+    const service = new WriteService(
+      adapter,
+      fakeConfig(true),
+      fakeCache(snap('live')),
+      { resolve: (_p: string, t: string) => (t === 'valve1' ? { domainKey: t, write: { ...SALIDA, timeoutMs: 5000 } } : null) } as unknown as CommandMappingResolver,
+      fakeRepo(),
+      fakeAudit().service,
+      fakeFirmas(),
+      avisos,
+    );
+
+    const t0 = Date.now();
+    const r = await service.execute('voragine', { command: 'open', target: 'valve1' }, OPERADOR_V);
+    const ms = Date.now() - t0;
+
+    assert.equal(r.status, 'sent', `${r.status} ${r.reason}`);
+    assert.equal(inserts.length, 1, 'la maniobra quedó en la bandeja');
+    // Mismo umbral que la orden sin push (arriba): si la respuesta esperara al envío, tardaría ≥ 5 s.
+    assert.ok(ms < 1500, `debía volver en menos de 1,5 s y tardó ${ms} ms`);
+
+    // Y el push no se perdió por desacoplarlo: sale, con la etiqueta del aviso recién guardado.
+    const fin = Date.now() + 1000;
+    while (envios.length === 0 && Date.now() < fin) await pausa(5);
+    assert.equal(envios.length, 1, 'el aviso de la maniobra se empuja igual');
+    assert.equal(envios[0].token, 'tok-jefe');
+    assert.equal(envios[0].android?.notification?.tag, 'n-1');
+    assert.equal(envios[0].data?.kind, 'valve_command');
+  } finally {
+    push.onModuleDestroy();
+  }
 });
 
 // ── Cobertura del SimulatorBridgeAdapter real (regla 5: probar contra el simulador) ──

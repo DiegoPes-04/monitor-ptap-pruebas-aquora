@@ -10,7 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
-import { hasPermission, type NotificationPrefsDto } from '@ptap/shared';
+import { hasPermission, type NotificationPrefsDto, type PruebaPushDto, type RegistroPushDto } from '@ptap/shared';
 import type { AuthenticatedRequest } from '../auth/authenticated-request';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionGuard } from '../auth/guards/permission.guard';
@@ -19,6 +19,14 @@ import { ZodValidationPipe } from '../../infrastructure/validation/zod-validatio
 import { NotificationRepository, type NotificationScope, type StoredNotification } from './notification.repository';
 import { NotificationPrefsRepository } from './notification-prefs.repository';
 import { notificationPrefsSchema } from './notification-prefs.dto';
+import { DevicePushTokenRepository } from './device-push-token.repository';
+import {
+  quitarDispositivoSchema,
+  registrarDispositivoSchema,
+  type QuitarDispositivoDto,
+  type RegistrarDispositivoDto,
+} from './device-push-token.dto';
+import { PushDispatcher } from './push.dispatcher';
 
 /** Ventana del historial. El requisito es "mínimo 24 h"; se sirven 72 para cubrir un fin de semana. */
 const HISTORY_HOURS = 72;
@@ -44,6 +52,8 @@ export class NotificationsController {
   constructor(
     @Inject(NotificationRepository) private readonly repo: NotificationRepository,
     @Inject(NotificationPrefsRepository) private readonly prefs: NotificationPrefsRepository,
+    @Inject(DevicePushTokenRepository) private readonly devices: DevicePushTokenRepository,
+    @Inject(PushDispatcher) private readonly push: PushDispatcher,
   ) {}
 
   /**
@@ -118,5 +128,49 @@ export class NotificationsController {
     const { userId } = this.scopeOf(req);
     await this.prefs.save(userId, body);
     return body;
+  }
+
+  /**
+   * Registra ESTE teléfono para recibir los avisos por push, a nombre de quien pide (el `userId` sale
+   * del token, nunca del cuerpo). La app lo llama cada vez que se abre con el permiso concedido.
+   *
+   * `pushActivo` dice si el servidor puede empujar ahora mismo. La app solo deja de publicar por su
+   * cuenta cuando es `true`: con el push apagado en el servidor, un teléfono que se creyera atendido
+   * por push se quedaría sin ningún aviso.
+   */
+  @Post('devices')
+  @RequirePermission('view_dashboard')
+  async registerDevice(
+    @Req() req: AuthenticatedRequest,
+    @Body(new ZodValidationPipe(registrarDispositivoSchema)) body: RegistrarDispositivoDto,
+  ): Promise<RegistroPushDto> {
+    const { userId } = this.scopeOf(req);
+    await this.devices.registrar(userId, body.token, body.platform, body.appVersion ?? null);
+    return { registrado: true, pushActivo: this.push.active };
+  }
+
+  /**
+   * Da de baja ESTE teléfono (al cerrar sesión). Solo si el token es de quien pide: nadie puede dejar
+   * sin avisos el teléfono de otra persona aunque conozca su token.
+   */
+  @Post('devices/unregister')
+  @RequirePermission('view_dashboard')
+  async unregisterDevice(
+    @Req() req: AuthenticatedRequest,
+    @Body(new ZodValidationPipe(quitarDispositivoSchema)) body: QuitarDispositivoDto,
+  ): Promise<{ quitado: boolean }> {
+    const { userId } = this.scopeOf(req);
+    return { quitado: (await this.devices.quitar(body.token, userId)) > 0 };
+  }
+
+  /**
+   * Manda un aviso de prueba a los teléfonos de QUIEN LO PIDE, y a ninguno más. Sirve para comprobar
+   * banner, sonido y pantalla de bloqueo sin esperar a una alarma real.
+   */
+  @Post('devices/prueba')
+  @RequirePermission('view_dashboard')
+  async testPush(@Req() req: AuthenticatedRequest): Promise<PruebaPushDto> {
+    const { userId, plantScope } = this.scopeOf(req);
+    return this.push.sendTest(userId, plantScope ?? req.user?.plant ?? '');
   }
 }

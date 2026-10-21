@@ -431,6 +431,91 @@ export function debeSonar(aviso: AvisoSonable, prefs: NotificationPrefsDto, ahor
   return !enSilencio;
 }
 
+/**
+ * Canales de Android de los avisos de planta. Contrato backend↔móvil: el backend los nombra en cada
+ * push (FCM) y la app los crea al arrancar.
+ *
+ * Viven aquí, y no como un literal en cada lado, porque un desajuste NO da error: si el push nombra
+ * un canal que el teléfono no tiene, Android lo publica en un canal de reserva de importancia
+ * normal —sin banner emergente—, que es exactamente el fallo que estos canales vienen a corregir.
+ *
+ * Los ids son nuevos (los de antes eran `ptap-alertas` y `ptap-criticas`) porque los canales de
+ * Android son INMUTABLES una vez creados: subirle la importancia a uno que el teléfono ya tiene no
+ * surte ningún efecto. Cambiar la importancia exige un id distinto.
+ */
+export const CANAL_AVISOS = 'aquora-avisos';
+export const CANAL_CRITICAS = 'aquora-criticas';
+
+/**
+ * Etiqueta de la notificación de un aviso de planta en el panel de Android.
+ *
+ * Android identifica cada notificación por (etiqueta, id numérico), y tanto la app como FCM usan el
+ * mismo id numérico (0). Con la misma etiqueta, el aviso que llega por push y el que levanta la
+ * consulta de respaldo son LA MISMA notificación: la segunda reemplaza a la primera en vez de
+ * apilarse al lado.
+ */
+export function etiquetaDeAviso(id: number): string {
+  return `n-${id}`;
+}
+
+/** Etiqueta del resumen («N avisos nuevos»). Un resumen nuevo reemplaza al anterior. */
+export const ETIQUETA_RESUMEN = 'resumen';
+
+/** Lo mínimo para componer el texto de un aviso en el panel del teléfono. */
+export interface AvisoPresentable {
+  severity: NotificationSeverity;
+  message: string;
+  action?: string | null;
+}
+
+/**
+ * Cuerpo de la notificación de un aviso, igual por push que por la consulta de respaldo.
+ *
+ * Lo crítico lleva además QUÉ HACER: es el aviso por el que alguien sale corriendo, y tiene que poder
+ * actuar leyendo solo el panel. El resto se queda en el mensaje, para que la notificación no se
+ * convierta en un párrafo; la acción sigue en la bandeja.
+ */
+export function cuerpoDeAviso(aviso: AvisoPresentable): string {
+  if (aviso.severity === 'critical' && aviso.action) return `${aviso.message}\n\n▸ ${aviso.action}`;
+  return aviso.message;
+}
+
+/**
+ * Título y texto del resumen que sustituye a más de dos avisos no críticos llegados de golpe.
+ *
+ * Llenar el panel con doce tarjetas es peor que una. Lo crítico NUNCA pasa por aquí: sale siempre
+ * con su título completo. Es el mismo texto por push que por la consulta de respaldo.
+ */
+export function resumenDeAvisos(avisos: readonly { plantId: string }[]): { titulo: string; cuerpo: string } {
+  const plantas = new Set(avisos.map((a) => a.plantId)).size;
+  return {
+    titulo: `${avisos.length} avisos nuevos`,
+    cuerpo: `${plantas} planta${plantas === 1 ? '' : 's'} requieren atención. Abre la aplicación para ver el detalle.`,
+  };
+}
+
+/**
+ * Respuesta de `POST /api/notifications/devices` (alta del teléfono para el push).
+ *
+ * `pushActivo` dice si el SERVIDOR puede empujar avisos (tiene la clave de Firebase). La app solo deja
+ * de publicar por su cuenta cuando es `true`: con el push apagado en el servidor, un teléfono que se
+ * creyera atendido por push se quedaría sin ningún aviso.
+ */
+export interface RegistroPushDto {
+  registrado: true;
+  pushActivo: boolean;
+}
+
+/** Respuesta de `POST /api/notifications/devices/prueba`: el aviso de prueba a los teléfonos propios. */
+export interface PruebaPushDto {
+  /** `false` = el servidor no tiene la clave de Firebase; no se intentó nada. */
+  pushActivo: boolean;
+  /** Teléfonos registrados a nombre de quien pide la prueba. */
+  telefonos: number;
+  enviados: number;
+  fallidos: number;
+}
+
 /** Cambio de liveness para el evento Socket.IO `opc:liveness`. */
 export interface LivenessChange {
   plantId: string;

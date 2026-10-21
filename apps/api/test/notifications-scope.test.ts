@@ -27,6 +27,8 @@ import { MYSQL_POOL } from '../src/infrastructure/database/database.tokens';
 import { NotificationRepository } from '../src/modules/notifications/notification.repository';
 import { NotificationsController } from '../src/modules/notifications/notifications.controller';
 import { NotificationPrefsRepository } from '../src/modules/notifications/notification-prefs.repository';
+import { DevicePushTokenRepository } from '../src/modules/notifications/device-push-token.repository';
+import { PushDispatcher, PUSH_OPTIONS } from '../src/modules/notifications/push.dispatcher';
 
 process.env.JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret-notifications-scope';
 
@@ -109,6 +111,10 @@ async function buildApp(pool: Pool) {
     providers: [
       NotificationRepository,
       NotificationPrefsRepository,
+      // El controlador también registra teléfonos para el push; aquí apagado, sin leer el entorno.
+      DevicePushTokenRepository,
+      PushDispatcher,
+      { provide: PUSH_OPTIONS, useValue: { sender: null } },
       JwtAuthGuard,
       PermissionGuard,
       JwtService,
