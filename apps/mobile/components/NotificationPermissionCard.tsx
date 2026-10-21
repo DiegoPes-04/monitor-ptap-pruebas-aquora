@@ -1,7 +1,44 @@
-import { View, Text, TouchableOpacity, StyleSheet, Linking, Platform } from 'react-native';
+import { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Linking, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Colors from '../constants/colors';
 import { useDeviceNotifications } from '../hooks/useDeviceNotifications';
+import { textoDePrueba, type EstadoPush } from '../services/push-rules';
+import { toast } from '../services/toast-store';
+
+/** Qué se le dice a la persona según en qué quedó el push de su teléfono. */
+function textoDeEstado(push: EstadoPush): { titulo: string; texto: string } {
+  switch (push) {
+    case 'activo':
+      return {
+        titulo: 'Avisos al instante (push) activos',
+        texto:
+          'Te llegan en el momento, aunque la aplicación esté cerrada o el teléfono bloqueado. ' +
+          'Eliges cuáles aquí abajo.',
+      };
+    case 'servidor-apagado':
+      return {
+        titulo: 'Avisos activados',
+        texto:
+          'El servidor todavía no envía avisos al instante: por ahora se revisa cada 15 minutos y al ' +
+          'abrir la aplicación.',
+      };
+    case 'error':
+      return {
+        titulo: 'Avisos activados',
+        texto:
+          'No se pudieron activar los avisos al instante; se reintenta al volver a abrir la aplicación. ' +
+          'Mientras tanto se revisa cada 15 minutos.',
+      };
+    default:
+      return {
+        titulo: 'Avisos activados',
+        texto:
+          'Recibirás en el panel del dispositivo los avisos que elijas aquí abajo. Se revisa cada ' +
+          '15 minutos y al abrir la aplicación.',
+      };
+  }
+}
 
 /**
  * Activar los avisos en el panel del sistema.
@@ -10,10 +47,27 @@ import { useDeviceNotifications } from '../hooks/useDeviceNotifications';
  * navegadores como Android rechazan las peticiones sin gesto del usuario, y una denegación es
  * difícil de revertir (el diálogo ya no vuelve a aparecer).
  *
+ * Con el permiso concedido dice si el teléfono recibe los avisos al instante (push) y ofrece «Enviar
+ * aviso de prueba»: la única forma de comprobar banner, sonido y pantalla de bloqueo sin esperar a
+ * una alarma real.
+ *
  * Cuando la plataforma no puede, se explica por qué en vez de mostrar un botón que no hará nada.
  */
 export function NotificationPermissionCard() {
-  const { supported, reason, permission, ask } = useDeviceNotifications();
+  const { supported, reason, permission, ask, push, probar } = useDeviceNotifications();
+  const [probando, setProbando] = useState(false);
+
+  async function enviarPrueba(): Promise<void> {
+    setProbando(true);
+    try {
+      const t = textoDePrueba(await probar());
+      toast[t.tipo](t.titulo, t.mensaje);
+    } catch (err) {
+      toast.error('No se pudo pedir el aviso de prueba', err instanceof Error ? err.message : undefined);
+    } finally {
+      setProbando(false);
+    }
+  }
 
   if (!supported) {
     return (
@@ -28,15 +82,32 @@ export function NotificationPermissionCard() {
   }
 
   if (permission === 'granted') {
+    const { titulo, texto } = textoDeEstado(push);
+    // La prueba solo tiene sentido donde puede haber push: Android con una APK que trae Firebase.
+    const puedeProbar = Platform.OS === 'android' && push !== 'no-disponible';
     return (
       <View style={[styles.card, styles.cardOk]}>
-        <Ionicons name="notifications" size={20} color={Colors.success} />
+        <Ionicons name={push === 'activo' ? 'flash' : 'notifications'} size={20} color={Colors.success} />
         <View style={styles.body}>
-          <Text style={styles.title}>Avisos activados</Text>
-          <Text style={styles.text}>
-            Recibirás en el panel del dispositivo los avisos que elijas aquí abajo. Se revisa cada
-            15 minutos y al abrir la aplicación.
-          </Text>
+          <Text style={styles.title}>{titulo}</Text>
+          <Text style={styles.text}>{texto}</Text>
+          {puedeProbar && (
+            <TouchableOpacity
+              style={styles.enlace}
+              onPress={() => void enviarPrueba()}
+              disabled={probando}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: probando, busy: probando }}
+              accessibilityLabel="Enviar un aviso de prueba a este teléfono"
+            >
+              {probando ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <Text style={styles.enlaceTexto}>Enviar aviso de prueba</Text>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     );

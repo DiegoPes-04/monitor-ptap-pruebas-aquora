@@ -65,3 +65,8 @@ apps/mobile/android/
 # Subagent-driven-development scratch state
 .superpowers/
 apps/mobile/eas.json
+
+# Configuración de Firebase de la APK (push FCM). La APK la necesita dentro y se copia a mano antes de
+# compilar; no va al repositorio. La CLAVE DE SERVICIO del backend tampoco: esa vive solo en la VM
+# (FIREBASE_SERVICE_ACCOUNT_PATH), nunca en este árbol.
+apps/mobile/google-services.json

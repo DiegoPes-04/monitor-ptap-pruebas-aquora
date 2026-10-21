@@ -8,7 +8,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { siguientePuntero } from './notification-pointer';
+import { punteroConPush, siguientePuntero } from './notification-pointer';
 
 test('puntero: todo publicado -> avanza hasta el id mas alto', () => {
   assert.equal(siguientePuntero(10, [11, 12, 13], new Set([11, 12, 13])), 13);
@@ -57,4 +57,17 @@ test('puntero: nunca retrocede por debajo de previo', () => {
 test('puntero: el orden y los repetidos de la entrada no cambian el resultado', () => {
   assert.equal(siguientePuntero(10, [13, 11, 12, 11], new Set([11, 12, 13])), 13);
   assert.equal(siguientePuntero(10, [13, 12, 11], new Set([11, 13])), 11);
+});
+
+// Con push, cada aviso ya lo mostro Android al llegar: la consulta de respaldo no publica nada, pero el
+// puntero sigue avanzando para que, si el push se corta, no salgan de golpe dias de avisos viejos.
+test('puntero con push: salta al id mas alto sin necesidad de publicar nada', () => {
+  assert.equal(punteroConPush(10, [11, 12, 13]), 13);
+  assert.equal(punteroConPush(10, [13, 11, 12]), 13, 'el orden de la entrada da igual');
+});
+
+test('puntero con push: sin candidatos o con ids viejos, se queda donde estaba (nunca retrocede)', () => {
+  assert.equal(punteroConPush(10, []), 10);
+  assert.equal(punteroConPush(10, [3, 7]), 10);
+  assert.equal(punteroConPush(0, []), 0);
 });

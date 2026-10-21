@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AppState, Linking, Platform } from 'react-native';
+import type { PruebaPushDto } from '@ptap/shared';
+import { useAuth } from '../context/AuthContext';
 import {
   getPermission,
   isSupported,
@@ -12,13 +14,16 @@ import {
   syncNotificationsToDevice,
   UPDATE_TAG,
 } from '../services/notification-sync';
+import { escucharCambiosDeToken, probarPush, registrarPush } from '../services/push-registration';
+import type { EstadoPush } from '../services/push-rules';
 
 /**
- * Notificaciones del sistema operativo: permiso + sincronización.
+ * Notificaciones del sistema operativo: permiso, push y sincronización de respaldo.
  *
  * Se monta en la cáscara de `(app)` (la franja de permiso) y en la tarjeta de Ajustes, siempre ya con
  * sesión: sin token la consulta a la bandeja daría 401. Que haya dos instancias no duplica avisos:
- * `syncNotificationsToDevice` comparte la sincronización en curso entre todos los que la piden.
+ * `syncNotificationsToDevice` comparte la sincronización en curso entre todos los que la piden, y
+ * `registrarPush` el registro.
  *
  * **No pide el permiso solo.** Un `requestPermission()` automático al arrancar lo rechazan los
  * navegadores y Android lo cuenta como denegado — y una vez denegado, volver a pedirlo ya no
@@ -42,9 +47,18 @@ export function useDeviceNotifications(): {
   reason: string | null;
   permission: PermissionState;
   ask: () => Promise<void>;
+  /** En qué quedó el push de este teléfono (ver `EstadoPush`). */
+  push: EstadoPush;
+  /** «Enviar aviso de prueba»: lo manda el servidor, solo a los teléfonos de quien lo pide. */
+  probar: () => Promise<PruebaPushDto>;
 } {
   const [permission, setPermission] = useState<PermissionState>('undetermined');
+  const [push, setPush] = useState<EstadoPush>('pendiente');
   const supported = isSupported();
+  // Mismo permiso que exige el servidor para registrar el teléfono: el Civil no recibe avisos de
+  // proceso, así que ni se intenta (sería un 403 cada vez que abre la app).
+  const { hasPermission } = useAuth();
+  const recibeAvisos = hasPermission('view_dashboard');
 
   // El permiso se vuelve a leer CADA VEZ que la app pasa a primer plano, con o sin permiso actual.
   // Quien lo había denegado lo concede desde los ajustes del sistema («Abrir ajustes» en la tarjeta)
@@ -66,6 +80,28 @@ export function useDeviceNotifications(): {
     void registerBackgroundSync();
     void syncNotificationsToDevice();
   }, [permission]);
+
+  // PUSH: con permiso y sesión, registrar este teléfono para que el servidor le empuje los avisos al
+  // instante. Se vuelve a registrar cada vez que la app pasa a primer plano —es barato y mantiene al
+  // día la marca que lee la consulta de respaldo— y cuando FCM rota el token. Si el registro falla, la
+  // marca se quita y la consulta de respaldo sigue publicando: el teléfono nunca queda mudo.
+  useEffect(() => {
+    if (permission !== 'granted' || !recibeAvisos || Platform.OS !== 'android') return;
+    let vivo = true;
+    const actualizar = (estado: EstadoPush): void => {
+      if (vivo) setPush(estado);
+    };
+    void registrarPush().then(actualizar);
+    const dejarDeEscuchar = escucharCambiosDeToken(actualizar);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void registrarPush().then(actualizar);
+    });
+    return () => {
+      vivo = false;
+      dejarDeEscuchar();
+      sub.remove();
+    };
+  }, [permission, recibeAvisos]);
 
   // Al volver a primer plano se sincroniza también: es el camino FIABLE. La tarea en segundo plano
   // es "lo mejor posible" y algunos fabricantes no la ejecutan nunca; esto garantiza que, al menos
@@ -149,5 +185,7 @@ export function useDeviceNotifications(): {
     setPermission(await requestPermission());
   }, []);
 
-  return { supported, reason: unsupportedReason(), permission, ask };
+  const probar = useCallback(() => probarPush(), []);
+
+  return { supported, reason: unsupportedReason(), permission, ask, push, probar };
 }

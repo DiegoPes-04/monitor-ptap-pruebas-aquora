@@ -21,6 +21,18 @@
 //         vibración pasa desapercibida justo en el caso que importa (una planta caída).
 //     RECEIVE_BOOT_COMPLETED lo añade `expo-background-task` por su cuenta: es lo que permite que
 //     la tarea periódica siga programada tras reiniciar el teléfono.
+//
+//  4. android.googleServicesFile — la configuración de Firebase (FCM) para los avisos al instante
+//     por push, desde la 1.4.0. Va DENTRO de la APK: sin ella el teléfono no puede tener token de
+//     FCM. Solo se declara si `google-services.json` existe junto a este archivo: no está en el repo
+//     (.gitignore; se copia a mano antes de compilar la APK), y declararlo sin el archivo rompería
+//     cualquier otra compilación —la web, un prebuild en otra máquina—. Una APK compilada sin él
+//     funciona igual, sin push: los avisos llegan por la consulta periódica de respaldo.
+const fs = require('fs');
+const path = require('path');
+
+const GOOGLE_SERVICES = path.join(__dirname, 'google-services.json');
+
 module.exports = ({ config }) => ({
   ...config,
   extra: {
@@ -29,6 +41,7 @@ module.exports = ({ config }) => ({
   },
   android: {
     ...config.android,
+    ...(fs.existsSync(GOOGLE_SERVICES) ? { googleServicesFile: './google-services.json' } : {}),
     permissions: ['INTERNET', 'POST_NOTIFICATIONS', 'VIBRATE'],
     // La plantilla base de Expo agrega permisos "opcionales" al manifest y `permissions` solo
     // AGREGA, nunca los quita — hay que bloquearlos explícitamente (tools:node="remove").

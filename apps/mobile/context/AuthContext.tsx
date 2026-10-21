@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 import type { AuthUser, Permission } from '@ptap/shared';
 import { hasPermission as checkPermission } from '@ptap/shared';
 import { setAuthToken, setOnUnauthorized } from '../services/api';
+import { desregistrarPush } from '../services/push-registration';
 import { resetSocket } from '../services/socket';
 // Claves, almacenamiento y lectura del `exp` viven en `session-store` para que la tarea de segundo
 // plano —que corre sin React— pueda leer la misma sesión. Ver ese módulo.
@@ -98,6 +99,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // Baja del push ANTES de borrar el JWT: la petición necesita la sesión. Sin ella, este teléfono
+    // seguiría recibiendo los avisos de la persona que acaba de salir. Lo mejor posible: no lanza y no
+    // espera más de unos segundos; si falla, el token pasa a quien entre después en este teléfono.
+    await desregistrarPush();
     await Promise.all([
       storage.deleteItem(TOKEN_KEY),
       storage.deleteItem(USER_KEY),

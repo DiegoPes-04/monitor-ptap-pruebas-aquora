@@ -1,4 +1,6 @@
 import { Platform } from 'react-native';
+import { CANAL_AVISOS, CANAL_CRITICAS } from '@ptap/shared';
+import { CANALES_AQUORA, CANALES_RETIRADOS } from './push-rules';
 
 /**
  * Notificaciones del SISTEMA OPERATIVO (panel de Android / centro de notificaciones del navegador).
@@ -7,8 +9,10 @@ import { Platform } from 'react-native';
  * servidor (`services/notifications.ts`). Esto es lo que aparece **fuera** de la aplicación.
  *
  * Dos implementaciones, porque no hay una que sirva para ambas:
- *  - **Nativo (APK)**: `expo-notifications` con notificaciones LOCALES. No hay servidor de push
- *    (nada de Firebase): el propio dispositivo consulta y levanta el aviso. Ver `notification-sync.ts`.
+ *  - **Nativo (APK)**: `expo-notifications`. Desde la 1.4.0 los avisos de planta llegan sobre todo por
+ *    PUSH (FCM): los muestra Android aunque la app esté cerrada (`push-registration.ts`). Las
+ *    notificaciones LOCALES de aquí quedan para la consulta de respaldo de los teléfonos sin push y
+ *    para el aviso de actualización. Ver `notification-sync.ts`.
  *  - **Web**: la API `Notification` del navegador. `expo-notifications` no soporta web.
  *
  * ⚠️ **En web esto solo funciona sobre HTTPS.** La API exige un *contexto seguro*; sobre
@@ -84,41 +88,52 @@ export async function requestPermission(): Promise<PermissionState> {
 }
 
 /**
- * Canal de Android. Obligatorio desde Android 8: sin canal, el sistema descarta la notificación
- * sin avisar.
+ * Canal de Android de los avisos normales. Obligatorio desde Android 8: sin canal, el sistema
+ * descarta la notificación sin avisar.
  *
- * Su importancia es DEFAULT, no alta: suena y aparece en el panel, pero no se despliega como aviso
- * emergente sobre la pantalla. Lo emergente queda para `CANAL_CRITICO`. Y no se puede subir aquí:
- * los canales de Android son inmutables una vez creados (ver abajo), así que cambiar este valor no
- * afectaría a ningún teléfono que ya tenga la app instalada.
+ * Importancia ALTA: suena, vibra y se despliega como aviso emergente sobre la pantalla, como un
+ * mensaje de WhatsApp. El canal anterior (`ptap-alertas`) estaba en DEFAULT —sonaba, pero el banner
+ * no salía— y no se podía subir: los canales de Android son INMUTABLES una vez creados, así que el
+ * arreglo exigió un id nuevo. El id es el que nombra el servidor en cada push (`@ptap/shared`).
  */
-export const CANAL_NORMAL = 'ptap-alertas';
+export const CANAL_NORMAL = CANAL_AVISOS;
 /**
- * Canal aparte para lo crítico. Los canales de Android son INMUTABLES una vez creados —cambiarle la
- * importancia a uno existente no surte efecto—, así que separar la urgencia exige un id nuevo.
+ * Canal aparte para lo crítico, de importancia MÁXIMA y con su propia vibración, larga.
  *
- * Existe porque hasta ahora un rebose real y un «el máximo está mal medido» sonaban y vibraban
- * exactamente igual. Cuando todo suena igual, el operario aprende a ignorarlo todo.
+ * Existe porque un rebose real y un «el máximo está mal medido» sonaban y vibraban exactamente igual.
+ * Cuando todo suena igual, el operario aprende a ignorarlo todo.
  */
-export const CANAL_CRITICO = 'ptap-criticas';
+export const CANAL_CRITICO = CANAL_CRITICAS;
 
+/**
+ * Crea (o deja como están) los canales de Aquora y borra los de las versiones anteriores.
+ *
+ * Se llama al arrancar y antes de publicar. Tiene que ejecutarse antes del primer push: si el push
+ * nombra un canal que el teléfono todavía no tiene, Android lo publica en uno de reserva sin banner.
+ *
+ * Sin `sound`: así el canal usa el sonido de notificación del sistema. Pasar `'default'` lo buscaría
+ * como un archivo de sonido propio de la app, y expo dejaría un error en el log en cada arranque.
+ */
 export async function ensureAndroidChannel(): Promise<void> {
   if (Platform.OS !== 'android') return;
   const Notifications = await nativeModule();
-  await Notifications.setNotificationChannelAsync(CANAL_NORMAL, {
-    name: 'Avisos de planta',
-    description: 'Sensores sin refrescar, señales fuera de rango y niveles de tanque.',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    vibrationPattern: [0, 250],
-    enableVibrate: true,
-  });
-  await Notifications.setNotificationChannelAsync(CANAL_CRITICO, {
-    name: 'Alertas críticas',
-    description: 'Tanque rebosando, sin autonomía o planta sin datos. Requieren actuar.',
-    importance: Notifications.AndroidImportance.MAX,
-    vibrationPattern: [0, 400, 200, 400, 200, 400],
-    enableVibrate: true,
-  });
+  for (const canal of CANALES_AQUORA) {
+    await Notifications.setNotificationChannelAsync(canal.id, {
+      name: canal.nombre,
+      description: canal.descripcion,
+      importance: Notifications.AndroidImportance[canal.importancia],
+      vibrationPattern: canal.vibracion,
+      enableVibrate: true,
+      // Visible entera con el teléfono bloqueado: es un aviso de planta, no un mensaje privado.
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+      bypassDnd: canal.saltarNoMolestar,
+    });
+  }
+  // Los viejos fuera: si no, «Avisos de planta» saldría dos veces en los ajustes del sistema, uno de
+  // ellos muerto. Borrar un canal que no existe no hace nada.
+  for (const id of CANALES_RETIRADOS) {
+    await Notifications.deleteNotificationChannelAsync(id).catch(() => undefined);
+  }
 }
 
 /**

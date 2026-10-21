@@ -40,3 +40,17 @@ export function siguientePuntero(
   }
   return puntero;
 }
+
+/**
+ * Puntero cuando el teléfono recibe los avisos por PUSH: salta al id más alto, sin publicar nada.
+ *
+ * Con push, cada aviso ya lo mostró Android en el momento en que el servidor lo guardó; si la consulta
+ * de respaldo lo publicara otra vez, el teléfono volvería a sonar por algo que ya sonó. Pero el puntero
+ * tiene que seguir avanzando igual: si el push se cortara mañana (sesión cerrada, servidor sin clave),
+ * la consulta retomaría desde aquí, y no soltaría de golpe días de avisos viejos.
+ *
+ * Nunca retrocede por debajo de `previo`.
+ */
+export function punteroConPush(previo: number, idsCandidatos: readonly number[]): number {
+  return Math.max(previo, ...idsCandidatos);
+}

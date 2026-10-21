@@ -1,22 +1,27 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
-import { debeSonar } from '@ptap/shared';
+import { cuerpoDeAviso, debeSonar, ETIQUETA_RESUMEN, etiquetaDeAviso, resumenDeAvisos } from '@ptap/shared';
 import { fetchNotifications, type AppNotification } from './notifications';
 import { ensureAndroidChannel, getPermission, presentNotification } from './device-notifications';
 import { getNotificationPrefs, loadNotificationPrefs } from './notification-prefs';
 import { fetchAppRelease, runningVersionCode } from './app-release';
 import { decidirAvisoActualizacion } from './app-release-compare';
-import { siguientePuntero } from './notification-pointer';
+import { punteroConPush, siguientePuntero } from './notification-pointer';
+import { pushActivo } from './push-registration';
 
 /**
  * Lleva los avisos del servidor al panel de notificaciones del dispositivo.
  *
- * **Sin servidor de push, a propósito.** No hay Firebase ni FCM: el dispositivo pregunta cada
- * ~15 min y levanta la notificación por su cuenta (`expo-background-task`, que por debajo usa
- * WorkManager en Android). A cambio de no depender de terceros, la entrega es **"lo mejor
+ * **Es el RESPALDO del push.** Desde la 1.4.0 el servidor empuja cada aviso por FCM en cuanto lo
+ * guarda y Android lo muestra aunque la app esté cerrada (`push-registration.ts`). Con el push activo,
+ * esto solo avanza el puntero, sin publicar: el aviso ya sonó. Sin push —una APK sin Firebase, el
+ * servidor sin clave, un fallo al registrar— todo funciona como antes, y lo de abajo sigue valiendo:
+ *
+ * El dispositivo pregunta cada ~15 min y levanta la notificación por su cuenta
+ * (`expo-background-task`, que por debajo usa WorkManager en Android). La entrega es **"lo mejor
  * posible"**: Android agrupa y retrasa estas tareas, y algunos fabricantes (Xiaomi, Huawei) matan
  * el proceso de forma agresiva. Para un aviso diario de "este sensor lleva días caído" es
- * suficiente; para una alarma de seguridad en segundos NO lo sería.
+ * suficiente; para una alarma de seguridad en segundos NO lo sería, y para eso está el push.
  *
  * La tarea NO se define aquí sino en `background-setup.native.ts`, al cargar el bundle: cuando
  * WorkManager despierta un proceso muerto no se monta React, y una tarea definida desde un hook no
@@ -208,6 +213,20 @@ async function sincronizar(): Promise<number> {
     return 0;
   }
 
+  // CON PUSH: cada aviso ya lo mostró Android cuando el servidor lo empujó, con las preferencias de
+  // esta persona aplicadas allí. Publicarlo aquí otra vez lo haría sonar dos veces. Solo se avanza el
+  // puntero —si el push se corta, la consulta retoma desde aquí sin soltar días de avisos viejos— y se
+  // vacía la lista de diferidos: con push, lo que cae en el «no molestar» se queda en la bandeja y nadie
+  // lo vuelve a sonar después, igual que decide el servidor.
+  if (await pushActivo()) {
+    const tope = punteroConPush(previo, candidatos.map((n) => n.id));
+    await Promise.all([
+      tope > previo ? rememberNotifiedId(tope) : Promise.resolve(),
+      pendientes.length > 0 ? recordarDiferidos([]) : Promise.resolve(),
+    ]);
+    return avisosActualizacion;
+  }
+
   // El "no molestar" no oculta nada: aplaza. Lo crítico lo atraviesa —un tanque rebosando suena a
   // las cuatro de la mañana— y el resto espera a que termine la franja, sin perderse por el camino.
   const ahora = new Date();
@@ -229,13 +248,13 @@ async function sincronizar(): Promise<number> {
     const criticos = nuevos.filter((n) => n.severity === 'critical');
     const resto = nuevos.filter((n) => n.severity !== 'critical');
 
+    // Título, texto y etiqueta salen de `@ptap/shared`, los mismos que usa el push del servidor: un
+    // aviso se lee igual llegue por donde llegue, y la etiqueta `n-<id>` hace que uno reemplace al otro.
     for (const n of criticos) {
       const ok = await presentNotification(
         n.title,
-        n.action ? `${n.message}
-
-▸ ${n.action}` : n.message,
-        { tag: `n-${n.id}`, plantId: n.plantId, subject: n.subject },
+        cuerpoDeAviso(n),
+        { tag: etiquetaDeAviso(n.id), plantId: n.plantId, subject: n.subject },
         true,
       );
       if (ok) publicados.push(n.id);
@@ -244,16 +263,16 @@ async function sincronizar(): Promise<number> {
     // Más de dos avisos de golpe se resumen: llenar el panel con doce tarjetas es peor que una. El
     // resumen cubre TODO `resto`: si sale, todos quedan anunciados; si falla, ninguno.
     if (resto.length > 2) {
-      const plantas = [...new Set(resto.map((n) => n.plantId))].length;
-      const ok = await presentNotification(
-        `${resto.length} avisos nuevos`,
-        `${plantas} planta${plantas === 1 ? '' : 's'} requieren atención. Abre la aplicación para ver el detalle.`,
-        { tag: 'resumen' },
-      );
+      const { titulo, cuerpo } = resumenDeAvisos(resto);
+      const ok = await presentNotification(titulo, cuerpo, { tag: ETIQUETA_RESUMEN });
       if (ok) publicados.push(...resto.map((n) => n.id));
     } else {
       for (const n of resto) {
-        const ok = await presentNotification(n.title, n.message, { tag: `n-${n.id}`, plantId: n.plantId, subject: n.subject });
+        const ok = await presentNotification(n.title, cuerpoDeAviso(n), {
+          tag: etiquetaDeAviso(n.id),
+          plantId: n.plantId,
+          subject: n.subject,
+        });
         if (ok) publicados.push(n.id);
       }
     }
