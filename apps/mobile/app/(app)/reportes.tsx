@@ -83,7 +83,14 @@ export default function ReportesScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refetch} colors={[Colors.primary]} tintColor={Colors.primary} />
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={() => {
+              void refetch();
+            }}
+            colors={[Colors.primary]}
+            tintColor={Colors.primary}
+          />
         }
       >
         <View style={styles.sectionHeader}>

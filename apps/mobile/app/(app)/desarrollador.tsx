@@ -331,7 +331,15 @@ export default function DesarrolladorScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView
         contentContainerStyle={styles.contenido}
-        refreshControl={<RefreshControl refreshing={false} onRefresh={refetch} tintColor={Colors.primary} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={false}
+            onRefresh={() => {
+              void refetch();
+            }}
+            tintColor={Colors.primary}
+          />
+        }
       >
         <Text style={styles.titulo}>Buffers crudos</Text>
         <Text style={styles.subtitulo}>

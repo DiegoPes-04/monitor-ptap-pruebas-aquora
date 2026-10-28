@@ -239,7 +239,7 @@ Procedimiento para una VM/VPS Linux limpia. Absorbe el antiguo `DEPLOY_VPS.md`.
 | Componente | Requisito | Por qué |
 |---|---|---|
 | **OS** | Linux 64-bit **glibc** (Ubuntu 22.04/24.04 LTS o Debian 12). **No Alpine/musl** | Los binarios *prebuilt* de `argon2` son para glibc |
-| **Node.js** | **22 LTS** | NestJS 11 exige `^20.11 \|\| >=22` |
+| **Node.js** | **26.12.1** | Versión exacta del proyecto en `.nvmrc` |
 | **npm** | 9+ (viene con Node) | El repo usa workspaces |
 | **git** | cualquiera | clonar el repo |
 | **build-essential + python3** | red de seguridad | por si `argon2` no encuentra su *prebuilt* y compila |

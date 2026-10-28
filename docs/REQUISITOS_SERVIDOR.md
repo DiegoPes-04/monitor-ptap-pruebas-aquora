@@ -42,7 +42,7 @@ Desglose del disco: SO (~8–10 GB) + `node_modules` del proyecto (~1.5–2 GB, 
 
 | Capa | Paquete | Para qué |
 |---|---|---|
-| **Runtime** | **Node.js 22 LTS** + npm 9+ | Ejecutar el backend (NestJS 11 exige Node ≥20.11/22) |
+| **Runtime** | **Node.js 26.12.1** + npm incluido | Runtime fijado por `.nvmrc`; versión publicada con correcciones de seguridad recientes |
 | **Control de versiones** | **git** | Clonar y actualizar el código desde GitHub |
 | **Gestor de proceso** | **PM2** (`npm i -g pm2`) *(o systemd)* | Mantener el backend vivo, reiniciar en caída/reboot, logs |
 | **Reverse proxy + TLS** | **nginx** + **certbot** (Let's Encrypt) | HTTPS en 443 → app en 4000, **con WebSocket** |
@@ -151,5 +151,5 @@ usaba cuando el paquete compartido solo existía como TypeScript.
 ## Resumen de una línea para el proveedor
 > **VPS Linux (Ubuntu Server 24.04 LTS), 2 vCPU, 2 GB RAM (4 GB si MySQL va en la misma VM), 20–40 GB
 > SSD, IP pública fija, con root/SSH; puertos 80/443 entrantes y salida permitida hacia GitHub, npm y
-> el PLC (OPC UA). Software a instalar: Node.js 22 LTS, git, PM2, nginx + certbot, build-essential +
+> el PLC (OPC UA). Software a instalar: Node.js 26.12.1, git, PM2, nginx + certbot, build-essential +
 > python3 (y MySQL 8 solo si no es gestionado).**

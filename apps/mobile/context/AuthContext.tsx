@@ -25,6 +25,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const logout = useCallback(async () => {
+    // Baja del push ANTES de borrar el JWT: la petición necesita la sesión. Sin ella, este teléfono
+    // seguiría recibiendo los avisos de la persona que acaba de salir. Lo mejor posible: no lanza y no
+    // espera más de unos segundos; si falla, el token pasa a quien entre después en este teléfono.
+    await desregistrarPush();
+    await Promise.all([
+      storage.deleteItem(TOKEN_KEY),
+      storage.deleteItem(USER_KEY),
+    ]);
+    setAuthToken(null);
+    // Corta el stream de datos del usuario que sale: sin esto el WS seguiría vivo y recibiendo
+    // snapshots con el JWT ya sin sesión.
+    resetSocket();
+    setToken(null);
+    setUser(null);
+  }, []);
+
   // Restaura la sesión persistida y deja el cliente REST listo con ese token. Una sesión
   // VENCIDA (el token pasó sus 8 h) se descarta aquí mismo: recargar la página no la revive
   // y el usuario cae en el login, no en una app que fallará con 401 en cada petición.
@@ -96,23 +113,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     resetSocket();
     setToken(newToken);
     setUser(newUser);
-  }, []);
-
-  const logout = useCallback(async () => {
-    // Baja del push ANTES de borrar el JWT: la petición necesita la sesión. Sin ella, este teléfono
-    // seguiría recibiendo los avisos de la persona que acaba de salir. Lo mejor posible: no lanza y no
-    // espera más de unos segundos; si falla, el token pasa a quien entre después en este teléfono.
-    await desregistrarPush();
-    await Promise.all([
-      storage.deleteItem(TOKEN_KEY),
-      storage.deleteItem(USER_KEY),
-    ]);
-    setAuthToken(null);
-    // Corta el stream de datos del usuario que sale: sin esto el WS seguiría vivo y recibiendo
-    // snapshots con el JWT ya sin sesión.
-    resetSocket();
-    setToken(null);
-    setUser(null);
   }, []);
 
   const hasPermission = useCallback(

@@ -153,6 +153,18 @@ const valvulaShape = {
   feedbackElements: z.array(elementoSchema).optional(),
 };
 
+const initialValuesSchema = z.record(z.string(), valor).superRefine((values, ctx) => {
+  for (const key of Object.keys(values)) {
+    if (!REF_ELEMENTO_GLOBAL.test(key)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [key],
+        message: 'se espera plantId/BUFFER[indice]',
+      });
+    }
+  }
+});
+
 const plantaShape = {
   _nota: z.string().optional(),
   msgCycleMs: ciclo.optional(),
@@ -173,9 +185,7 @@ export const escenarioSchema = z
     defaults: z.object({ ...valvulaShape, ...plantaShape }).strict().optional(),
     plants: z.record(z.string(), z.object(plantaShape).strict()).optional(),
     valves: z.record(z.string(), z.object(valvulaShape).strict()).optional(),
-    initialValues: z
-      .record(z.string().regex(REF_ELEMENTO_GLOBAL, 'se espera plantId/BUFFER[indice]'), valor)
-      .optional(),
+    initialValues: initialValuesSchema.optional(),
   })
   .strict();
 

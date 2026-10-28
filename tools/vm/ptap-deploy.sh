@@ -9,9 +9,8 @@
 # Recoge en un solo sitio los cuatro tropiezos que costaron caídas de verdad:
 #
 #  1. **`pm2 restart --update-env` tumba la API.** Reemplaza el entorno del proceso por el del shell
-#     que invoca el comando; desde SSH no interactivo ese entorno es mínimo y la API arranca pero
-#     nunca escucha en el 4000, mientras `pm2 list` la reporta `online`. ~3 min de caída el
-#     2026-07-31. Aquí SIEMPRE es `pm2 restart` a secas.
+#     que invoca el comando; desde SSH no interactivo ese entorno es mínimo. Aquí se recrea el
+#     proceso desde el ecosystem, que conserva `NODE_ENV` y carga secretos desde el `.env` del repo.
 #  2. **`git pull` no basta.** La rama local de la VM ha seguido a `yosh` con otro nombre, y un pull
 #     respondía "Already up to date" sin traer nada: todo en verde, sin desplegar. Aquí es
 #     `fetch` + `reset --hard origin/<rama>`.
@@ -45,7 +44,45 @@ git --no-pager log --oneline -1
 LOCK_DESPUES="$(md5sum package-lock.json | cut -d' ' -f1)"
 
 echo ""
-echo "=== 2/6  dependencias ==="
+echo "=== 2/6  runtime y dependencias ==="
+NODE_VERSION="$(tr -d '[:space:]' < .nvmrc)"
+NODE_HOME="$HOME/.local/node-v$NODE_VERSION"
+NODE_BIN="$NODE_HOME/bin/node"
+
+case "$(uname -m)" in
+  x86_64) NODE_ARCH="x64" ;;
+  aarch64|arm64) NODE_ARCH="arm64" ;;
+  *) echo "arquitectura no soportada para Node.js: $(uname -m)" >&2; exit 1 ;;
+esac
+
+if [[ ! -x "$NODE_BIN" ]] || [[ "$("$NODE_BIN" --version)" != "v$NODE_VERSION" ]]; then
+  NODE_ARCHIVE="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"
+  NODE_TMP="$(mktemp -d)"
+  trap 'rm -rf -- "$NODE_TMP"' EXIT
+  curl --fail --location --silent --show-error \
+    "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_ARCHIVE}" \
+    --output "$NODE_TMP/$NODE_ARCHIVE"
+  curl --fail --location --silent --show-error \
+    "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" \
+    --output "$NODE_TMP/SHASUMS256.txt"
+  (
+    cd "$NODE_TMP"
+    awk -v archive="$NODE_ARCHIVE" '$2 == archive { print; found=1 } END { exit !found }' \
+      SHASUMS256.txt | sha256sum --check --status
+  )
+  mkdir -p "$NODE_HOME"
+  tar -xJf "$NODE_TMP/$NODE_ARCHIVE" --strip-components=1 -C "$NODE_HOME"
+  rm -rf -- "$NODE_TMP"
+  trap - EXIT
+fi
+
+export PATH="$NODE_HOME/bin:$PATH"
+if [[ "$(node --version)" != "v$NODE_VERSION" ]]; then
+  echo "Node.js esperado v$NODE_VERSION, encontrado $(node --version)" >&2
+  exit 1
+fi
+echo "  Node.js $(node --version), npm $(npm --version)"
+
 if [[ "$LOCK_ANTES" != "$LOCK_DESPUES" ]]; then
   echo "  package-lock.json cambió: npm ci"
   npm ci
@@ -65,7 +102,10 @@ npm run --silent build
 
 echo ""
 echo "=== 5/6  reiniciar la API ==="
-pm2 restart ptap-api   # JAMÁS con --update-env
+if pm2 describe ptap-api >/dev/null 2>&1; then
+  pm2 delete ptap-api
+fi
+PTAP_NODE_BINARY="$NODE_BIN" pm2 start apps/api/ecosystem.config.js --only ptap-api
 pm2 save >/dev/null
 
 # Tras el reinicio, /api/health devuelve 000 unos segundos mientras conecta el puente OPC UA. No es

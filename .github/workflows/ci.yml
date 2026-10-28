@@ -21,28 +21,35 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Instalar dependencias
         run: npm ci
 
-      # Auditoría de dependencias (seguridad frontend #13). Informativo: no bloquea el pipeline por
-      # avisos transitivos (node-opcua/expo arrastran muchos), pero SÍ los deja visibles en el log.
-      # Para endurecer, quitar `continue-on-error` o subir a `--audit-level=critical`.
-      - name: Auditoría de dependencias (npm audit)
-        continue-on-error: true
+      - name: Auditoría de dependencias del monorepo
+        # Expo SDK 58 aún depende de deepmerge 4.3.1, que es su última publicación y no tiene
+        # versión corregida disponible. Bloquea vulnerabilidades high/critical mientras siga así.
         run: npm audit --audit-level=high
+
+      - name: Instalar herramienta PLC
+        run: npm ci --prefix tools/plc-discovery
+
+      - name: Auditoría de herramienta PLC
+        run: npm audit --prefix tools/plc-discovery --audit-level=high
 
       - name: Typecheck (api + mobile + shared)
         run: npm run typecheck
 
       - name: Lint (todos los workspaces)
         run: npm run lint
+
+      - name: Typecheck herramienta PLC
+        run: npm run typecheck --prefix tools/plc-discovery
 
       - name: Tests del API (todos los test/*.test.ts, por glob)
         working-directory: apps/api

@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { View, Animated, Easing, StyleSheet, type ViewStyle } from 'react-native';
 import Colors from '../constants/colors';
 
@@ -10,7 +10,7 @@ import Colors from '../constants/colors';
  * al contrario que la barra de nivel del tanque (que anima ancho y no puede).
  */
 function usePulse(): Animated.Value {
-  const pulse = useRef(new Animated.Value(0.4)).current;
+  const [pulse] = useState(() => new Animated.Value(0.4));
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([

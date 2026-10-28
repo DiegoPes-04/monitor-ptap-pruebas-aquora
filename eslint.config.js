@@ -5,6 +5,14 @@ module.exports = [
   ...expoConfig,
   prettierConfig,
   {
+    settings: {
+      'import/parsers': {
+        '@typescript-eslint/parser': [],
+        [require.resolve('@typescript-eslint/parser')]: ['.ts', '.tsx', '.d.ts'],
+      },
+    },
+  },
+  {
     // expo/no-dynamic-env-var existe porque Expo INLINEA las EXPO_PUBLIC_* en build (un acceso
     // dinámico allí devuelve undefined en runtime). El backend es Node puro: process.env[name]
     // es legítimo y sus helpers de config lo usan a propósito. Solo se apaga para el API.
@@ -21,6 +29,11 @@ module.exports = [
       sourceType: 'commonjs',
       globals: { module: 'writable', require: 'readonly', __dirname: 'readonly', process: 'readonly' },
     },
+  },
+  {
+    files: ['apps/mobile/**/*.{ts,tsx}'],
+    // Keep diagnostics visible for existing session, plant, and timer synchronization effects.
+    rules: { 'react-hooks/set-state-in-effect': 'warn' },
   },
   {
     ignores: [

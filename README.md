@@ -229,14 +229,14 @@ monitor-ptap/
 |------|----------|--------|
 | **Monorepo** | npm workspaces (`apps/*`, `packages/*`) | Sin herramienta extra; comparte tipos vía `@ptap/shared`. |
 | **Lenguaje** | TypeScript estricto (sin `any` silencioso) | Errores tipados por capa; contrato explícito PLC↔dominio↔front. |
-| **Backend** | NestJS 11 + Express | DI e inyección por módulos encajan con la arquitectura de capas. |
+| **Backend** | NestJS 12 + Express | DI e inyección por módulos encajan con la arquitectura de capas. |
 | **OPC UA** | `node-opcua` | Cliente OPC UA maduro (Subscriptions, MonitoredItems, PKI, reconexión). |
 | **Tiempo real** | Socket.IO 4 (`@nestjs/platform-socket.io`) | Push por planta solo en cambios; el front no hace polling. |
 | **Base de datos** | MySQL (`mysql2`) | **Solo** auth/usuarios/auditoría/config. **Nunca** telemetría (regla 1). |
 | **Runtime dev** | `tsx` | Ejecuta TS sin build; `tsx watch` para hot-reload. |
 | **Tests** | Runner nativo `node:test` + `tsx` (no Jest) | Cero config; rápido; suficiente para lógica pura y de temporizadores. |
 | **Mapping** | JSON + JSON Schema (`ajv`) + generador idempotente | La semántica vive en datos versionados, no en el código (regla 2). |
-| **Móvil** | Expo ~56 + React Native 0.85 + expo-router | Un solo código para Android/iOS/Web. |
+| **Móvil** | Expo ~58 + React Native 0.88 + expo-router | Un solo código para Android/iOS/Web. |
 | **Estado datos móvil** | TanStack React Query 5 | Cache + estados de carga; el socket parchea la cache. |
 | **Estilos móvil** | NativeWind 4 (Tailwind) + estilos inline | Consistencia visual sin CSS aparte. |
 | **Formato config PLC** | `opc_mapping.json` con `{ nsUri, identifier }` sin índice de ns | El índice de namespace de Optix cambia entre reinicios → se resuelve en runtime. |
@@ -246,7 +246,7 @@ monitor-ptap/
 
 ## Requisitos previos
 
-- **Node.js ≥ 20** (probado en 24). Incluye `npm`.
+- **Node.js 26.12.1 o superior**. La versión exacta del proyecto está en `.nvmrc`; incluye `npm`.
 - **Git Bash** o PowerShell (Windows).
 - **MySQL** corriendo en `127.0.0.1:3306` — **solo** si vas a levantar el backend COMPLETO
   (`main.ts`). El arranque de **telemetría** no lo necesita. En Windows, si no tienes MySQL
@@ -276,8 +276,11 @@ monitor-ptap/
 Desde la raíz del monorepo (instala todos los workspaces):
 
 ```bash
-npm install
+npm ci
 ```
+
+> **SDK 58:** Expo Go para SDK 58 todavía no está publicado en las tiendas. Para probar en un
+> dispositivo, usa una development build o una APK compilada con `npm run build:android`.
 
 ---
 

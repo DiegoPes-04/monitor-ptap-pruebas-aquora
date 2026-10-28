@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { TankAutonomyDto } from '../services/api';
 import type { TankView } from '../services/tanks';
 import Colors from '../constants/colors';
@@ -63,7 +63,7 @@ function TankGaugeCardBase({ tank, frozen = false, plantId }: Props) {
     (tank.percentage !== null && (tank.percentage < 0 || tank.percentage > 100));
   const autonomia = autonomiaTexto(tank.autonomy);
   const sujeto = sujetoDelTanque(tank.id);
-  const fillAnim = useRef(new Animated.Value(0)).current;
+  const [fillAnim] = useState(() => new Animated.Value(0));
   /** Último valor al que se llevó la barra: permite saltarse los tweens imperceptibles. */
   const shownPct = useRef<number | null>(null);
 

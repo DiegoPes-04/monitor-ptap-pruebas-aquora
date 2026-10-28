@@ -8,7 +8,7 @@
 
 ## 1. Arquitectura del backend
 
-- **NestJS 11 + TypeScript** sobre Express, monorepo npm workspaces (`apps/api`).
+- **NestJS 12 + TypeScript** sobre Express, monorepo npm workspaces (`apps/api`).
 - Módulos de dominio en `apps/api/src/modules/` (health, auth, users, plants, snapshots, telemetry, alarms, commands, reports — los cinco últimos son placeholders vacíos).
 - Infraestructura en `apps/api/src/infrastructure/`:
   - `connectivity/` — arquitectura de puertos (reader/writer/protocol-adapter). Hoy el adapter es un **simulador** (`connectionStatus: 'mock'`); OPC UA real entrará por el mismo puerto sin cambiar el contrato HTTP.
@@ -20,7 +20,7 @@
 
 ```powershell
 # desde la raíz del monorepo
-npm install
+npm ci
 npm run dev:api        # tsx watch, puerto 4000
 # o compilado:
 npm run build -w @ptap/api ; node apps/api/dist/main.js
@@ -47,7 +47,7 @@ Archivo `.env` en la **raíz del monorepo** (plantilla: `.env.example`; el `.env
 
 ## 4–5. Tecnologías y estructura
 
-Backend: NestJS 11, socket.io 4, mysql2, dotenv, argon2, rxjs. Frontend: Expo SDK 56 (expo-router), React Query v5, nativewind, expo-secure-store. Estructura completa en `docs/architecture/backend-structure.md`.
+Backend: NestJS 12, socket.io 4, mysql2, dotenv, argon2, rxjs. Frontend: Expo SDK 58 (expo-router), React Query v5, nativewind, expo-secure-store. Estructura completa en `docs/architecture/backend-structure.md`.
 
 ## 6. Flujo de autenticación — estado real
 

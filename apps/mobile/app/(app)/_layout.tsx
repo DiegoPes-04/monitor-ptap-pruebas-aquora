@@ -295,7 +295,11 @@ export default function AppLayout() {
             ...HEADER_OPTS,
             tabBarLabel: 'Tablero',
             tabBarIcon: ({ color, size, focused }) => (
-              <Ionicons name={focused ? 'grid' : 'grid-outline'} size={size} color={color} />
+              <Ionicons
+                name={focused ? 'grid' : 'grid-outline'}
+                size={size}
+                color={typeof color === 'string' ? color : Colors.primary}
+              />
             ),
           }}
         />
@@ -305,7 +309,11 @@ export default function AppLayout() {
             ...HEADER_OPTS,
             tabBarLabel: 'Válvulas',
             tabBarIcon: ({ color, size, focused }) => (
-              <Ionicons name={focused ? 'toggle' : 'toggle-outline'} size={size} color={color} />
+              <Ionicons
+                name={focused ? 'toggle' : 'toggle-outline'}
+                size={size}
+                color={typeof color === 'string' ? color : Colors.primary}
+              />
             ),
           }}
         />
@@ -318,7 +326,7 @@ export default function AppLayout() {
               <Ionicons
                 name={focused ? 'document-text' : 'document-text-outline'}
                 size={size}
-                color={color}
+                color={typeof color === 'string' ? color : Colors.primary}
               />
             ),
           }}

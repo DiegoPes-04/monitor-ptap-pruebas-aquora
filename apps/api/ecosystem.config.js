@@ -12,6 +12,7 @@ module.exports = {
     {
       name: 'ptap-api',
       script: 'dist/main.js', // build de producción (node puro; @ptap/shared ya resuelve a su dist)
+      interpreter: process.env.PTAP_NODE_BINARY || 'node',
       cwd: __dirname, // apps/api — el .env de la raíz lo carga la app (config/load-env)
       instances: 1, // NO cluster: el puente OPC UA y las suscripciones Socket.IO son de una sola instancia
       exec_mode: 'fork',

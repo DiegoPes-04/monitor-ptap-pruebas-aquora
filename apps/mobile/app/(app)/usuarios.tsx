@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -107,7 +107,9 @@ export default function UsuariosScreen() {
   // el estado haría que, tras cambiar de filtro, aprobar una cuenta recargara con los filtros
   // viejos.
   const filtersRef = useRef({ search, status, roleFilter });
-  filtersRef.current = { search, status, roleFilter };
+  useLayoutEffect(() => {
+    filtersRef.current = { search, status, roleFilter };
+  }, [search, status, roleFilter]);
 
   const onToggleExpand = useCallback(
     (id: string) => setExpandedId((current) => (current === id ? null : id)),
@@ -213,7 +215,9 @@ export default function UsuariosScreen() {
         }
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
-        ListFooterComponent={loadingMore ? <ActivityIndicator size="small" color={Colors.primary} style={styles.footerLoader} /> : null}
+        ListFooterComponent={
+          loadingMore ? <ActivityIndicator size="small" color={Colors.primary} style={styles.footerLoader} /> : undefined
+        }
         ListEmptyComponent={
           <Text style={styles.empty}>
             {status === 'pendientes' && !search && !roleFilter
